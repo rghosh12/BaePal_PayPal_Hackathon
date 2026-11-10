@@ -35,6 +35,10 @@ Signup confirmation/reset messages go to the private local directory **`.data/ma
 
 See [feature gaps and release gates](docs/STATUS.md) before evaluating completeness. In particular, uploads currently provide technical validation and EXIF removal, **not content moderation**. Do not use real member data.
 
+## GitHub backlog
+
+[Prioritized issues](docs/ISSUES.md) track the remaining specification work. [P0 completion checklist #21](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/21) links the release gates.
+
 ## Verification
 
 Create a separate database; the suite refuses database names that do not end in `_test` and truncates only that database.
