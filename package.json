@@ -12,7 +12,7 @@
     "dev:web": "pnpm --filter @baepal/web dev",
     "db:migrate": "pnpm --filter @baepal/api migrate",
     "db:seed": "pnpm --filter @baepal/api seed",
-    "test": "bash scripts/test.sh && pnpm --filter @baepal/hosted test",
+    "test": "pnpm --filter @baepal/integrations test && bash scripts/test.sh && pnpm --filter @baepal/hosted test",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "build": "node scripts/sync-hosted-ui.mjs && pnpm -r build",
@@ -22,7 +22,8 @@
     "test:prototype": "pnpm --filter @baepal/hosted test",
     "test:hosted:e2e": "playwright test --config playwright.hosted.config.ts",
     "test:postman": "node scripts/generate-postman.mjs --check && node scripts/run-postman.mjs",
-    "postman:generate": "node scripts/generate-postman.mjs"
+    "postman:generate": "node scripts/generate-postman.mjs",
+    "integrations:check": "node scripts/check-integrations.mjs"
   },
   "devDependencies": {
     "concurrently": "9.2.1",

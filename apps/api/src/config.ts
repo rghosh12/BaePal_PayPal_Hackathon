@@ -6,6 +6,7 @@ dotenv.config({
   quiet: true,
 });
 const schema = z.object({
+  BAEPAL_INTEGRATIONS_JSON: z.string().max(65536).optional(),
   DATABASE_URL: z.string().url(),
   APP_ORIGIN: z.string().url().default("http://localhost:3000"),
   PORT: z.coerce.number().default(4000),

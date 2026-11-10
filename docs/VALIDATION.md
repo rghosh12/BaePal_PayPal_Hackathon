@@ -40,3 +40,7 @@ The final hosted persona-switching refinement reloads the document after an expl
 ### Postman taste regression
 
 The `feature/postman-regression-suite` slice adds a real Newman 6.2.3 execution against the isolated Worker harness: 18 requests, 27 assertions, zero failures locally. CI runs `pnpm test:postman` after building the Worker. Coverage and remaining payment/Sandbox work are documented in `postman/README.md`; issue #29 remains open. This is synthetic local evidence only.
+
+### Secure integration hub
+
+The shared server-only hub adds nine contract/transport tests, bringing the local suites to 46 passing tests (9 shared, 20 PostgreSQL API, 17 hosted Worker). Both runtimes test the configured preview/planner connection points with isolated gateway fixtures. Lint, type checks and production builds pass; the existing Newman collection still passes 18 requests / 27 assertions. The new hosted browser check covers the Connected services page at 360px, disabled execution and absence of browser credential fields. CI is the browser execution environment. Real sponsor credentials and native provider executions remain unavailable; gateway fixtures do not establish native interoperability.

@@ -1,3 +1,10 @@
+import {
+  createIntegrationHub,
+  rankCatalogue,
+  integrationStatus,
+  validatePreview,
+  IntegrationError,
+} from "@baepal/integrations";
 import Fastify, { type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
@@ -141,7 +148,7 @@ export async function buildApp() {
           requestId: _r.id,
         },
       });
-    if (error instanceof AppError)
+    if (error instanceof AppError || error instanceof IntegrationError)
       return reply.code(error.status).send({
         error: { code: error.code, message: error.message, requestId: _r.id },
       });
@@ -189,6 +196,26 @@ export async function buildApp() {
       aiMode: "deterministic",
       connections: { linkedin: "unavailable", github: "unavailable" },
     }),
+  );
+  app.get("/api/v1/integrations/status", async (r) => {
+    await member(r);
+    return ok(integrationStatus(config.BAEPAL_INTEGRATIONS_JSON));
+  });
+  app.post(
+    "/api/v1/integrations/preview",
+    { config: { rateLimit: { max: 8, timeWindow: "1 hour" } } },
+    async (r) => {
+      await member(r);
+      const preview = validatePreview(r.body);
+      return ok(
+        await createIntegrationHub(config.BAEPAL_INTEGRATIONS_JSON).invoke(
+          preview.provider,
+          preview.operation,
+          preview.input,
+          { allowExternalProcessing: true },
+        ),
+      );
+    },
   );
   async function challenge(user: string, purpose = "email") {
     return tx(async (c) => {
@@ -847,6 +874,27 @@ export async function buildApp() {
       const s = await member(r);
       const p = await planFor(db, param(r), s.user_id);
       const available = await options(db, p.id);
+      if ((r.body as any)?.useExternalProvider === true) {
+        const permission = z
+          .object({
+            useExternalProvider: z.literal(true),
+            allowExternalProcessing: z.literal(true),
+          })
+          .strict()
+          .parse(r.body);
+        const external = await rankCatalogue(
+          config.BAEPAL_INTEGRATIONS_JSON,
+          available,
+          permission,
+        );
+        return ok({
+          ...external,
+          label:
+            "Provider-ranked fictional catalogue. Review before proposing; no reservation.",
+          privacy:
+            "Only eligible public catalogue entries were shared; no exact private budgets or messages.",
+        });
+      }
       const ranked = await new DeterministicPlanner().suggestDates({
         publicInterests: [],
         eligibleOptions: available,

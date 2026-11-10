@@ -1,3 +1,9 @@
+import {
+  createIntegrationHub,
+  rankCatalogue,
+  integrationStatus,
+  validatePreview,
+} from "@baepal/integrations";
 import { z } from "zod";
 import type { Env, State, Row } from "./types";
 import {
@@ -378,6 +384,10 @@ export async function handleAPI(request: Request, env: Env): Promise<Response> {
       });
     const read = (s: State) => {
       const u = userFor(s, uid);
+      if (path === "/integrations/status") {
+        member(s, u.id);
+        return integrationStatus(env.BAEPAL_INTEGRATIONS_JSON);
+      }
       if (path === "/me")
         return {
           id: u.id,
@@ -534,6 +544,54 @@ export async function handleAPI(request: Request, env: Env): Promise<Response> {
       );
     };
     if (method === "GET") return json(read((await load(owner, env)).state));
+    if (
+      method === "POST" &&
+      /^\/date-plans\/[\w-]+\/suggestions$/.test(path) &&
+      body.useExternalProvider === true
+    ) {
+      const permission = z
+        .object({
+          useExternalProvider: z.literal(true),
+          allowExternalProcessing: z.literal(true),
+        })
+        .strict()
+        .parse(body);
+      const available = await mutate(owner, env, (s) => {
+        const u = member(s, uid);
+        const p = planFor(s, id.parse(path.split("/")[2]), u);
+        limit(s, `suggest:${u.id}:${p.id}`, 8, 3600000);
+        return options(p);
+      });
+      const external = await rankCatalogue(
+        env.BAEPAL_INTEGRATIONS_JSON,
+        available,
+        permission,
+      );
+      return json({
+        ...external,
+        label:
+          "Provider-ranked fictional catalogue. Review before proposing; no reservation.",
+        privacy:
+          "Only eligible public catalogue entries were shared; no exact private budgets or messages.",
+      });
+    }
+    if (method === "POST" && path === "/integrations/preview") {
+      const preview = validatePreview(body);
+      await mutate(owner, env, (s) => {
+        const u = member(s, uid);
+        limit(s, `integration:${u.id}`, 8, 3600000);
+        return null;
+      });
+      // Network calls stay outside retryable state mutations; never resend on CAS retries.
+      return json(
+        await createIntegrationHub(env.BAEPAL_INTEGRATIONS_JSON).invoke(
+          preview.provider,
+          preview.operation,
+          preview.input,
+          { allowExternalProcessing: true },
+        ),
+      );
+    }
     const result = await mutate(owner, env, async (s) => {
       const u = userFor(s, uid);
       limit(s, `request:${u.id}`, 120, 60000);

@@ -75,6 +75,52 @@ test("persistent hosted two-person journey, private budgets, independent capture
       {},
     );
     assert.equal(opts.options[0].price_cents, 3000);
+    const oldFetch = globalThis.fetch;
+    try {
+      f.env.BAEPAL_INTEGRATIONS_JSON = JSON.stringify({
+        version: 1,
+        providers: {
+          astropods: {
+            enabled: true,
+            protocol: "baepal-gateway-v1",
+            baseUrl: "https://gateway.example.com",
+            auth: "bearer",
+            token: "fixture-secret-only",
+            operations: ["plan"],
+          },
+        },
+      });
+      let calls = 0;
+      globalThis.fetch = async (_url, init) => {
+        calls++;
+        const input = JSON.parse(init!.body as string).input;
+        assert.deepEqual(Object.keys(input.options[0]).sort(), [
+          "activity",
+          "id",
+          "priceCents",
+          "title",
+        ]);
+        assert.equal(JSON.stringify(input).includes("5000"), false);
+        return Response.json({
+          version: 1,
+          data: {
+            suggestions: [{ id: "art", reason: "An eligible art option." }],
+          },
+        });
+      };
+      const external = await f.data(
+        "Alex",
+        "POST",
+        `/date-plans/${p.id}/suggestions`,
+        { useExternalProvider: true, allowExternalProcessing: true },
+      );
+      assert.equal(external.options[0].price_cents, 3000);
+      assert.equal(external.evidence.mode, "gateway");
+      assert.equal(calls, 1);
+    } finally {
+      globalThis.fetch = oldFetch;
+    }
+
     await f.data("Alex", "POST", `/date-plans/${p.id}/proposals`, {
       optionId: "art",
       startsAt: start,
