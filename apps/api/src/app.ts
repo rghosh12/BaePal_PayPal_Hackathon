@@ -35,6 +35,7 @@ import {
   planDTO,
   options,
   savePreferences,
+  assertPlanningOpen,
   cancelPlan,
 } from "./domain.js";
 import { createOrder, captureOrder, ownPayment } from "./payments.js";
@@ -927,8 +928,7 @@ export async function buildApp() {
           "VERSION_CONFLICT",
           "This plan changed. Refresh and try again.",
         );
-      if (["cancelled", "expired", "completed"].includes(p.status))
-        return fail(409, "PLAN_CLOSED", "This plan is closed.");
+      assertPlanningOpen(p);
       if (
         (
           await c.query(
@@ -1018,6 +1018,12 @@ export async function buildApp() {
       const b = body(r, z.object({ expectedVersion: z.number().int() }));
       if (p.version !== b.expectedVersion)
         return fail(409, "VERSION_CONFLICT", "Plan changed. Refresh first.");
+      if (p.status === "completed")
+        return fail(
+          409,
+          "PLAN_CLOSED",
+          "A completed plan cannot be cancelled.",
+        );
       await cancelPlan(c, p);
       return ok({
         cancelled: true,
