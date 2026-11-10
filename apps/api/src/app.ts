@@ -35,6 +35,7 @@ import {
   planDTO,
   options,
   savePreferences,
+  assertPlanningOpen,
   cancelPlan,
 } from "./domain.js";
 import { createOrder, captureOrder, ownPayment } from "./payments.js";
@@ -224,6 +225,23 @@ export async function buildApp() {
   );
   async function challenge(user: string, purpose = "email") {
     return tx(async (c) => {
+      // A first request has no challenge row to lock. Serialize issuance and
+      // completion on the stable account before touching challenge rows.
+      const account = await one(
+        c,
+        "SELECT id,status FROM users WHERE id=$1 FOR UPDATE",
+        [user],
+      );
+      if (
+        !account ||
+        ["suspended", "deleted"].includes(account.status) ||
+        (purpose === "email" && account.status !== "pending_email")
+      )
+        return fail(
+          409,
+          "ACCOUNT_UNAVAILABLE",
+          "This account is unavailable for this code.",
+        );
       const previous = await one(
         c,
         "SELECT * FROM challenges WHERE user_id=$1 AND purpose=$2 ORDER BY created_at DESC LIMIT 1 FOR UPDATE",
@@ -333,6 +351,13 @@ export async function buildApp() {
       z.object({ challengeId: id, code: z.string().length(6) }),
     );
     const result = await tx(async (c) => {
+      // Keep account -> challenge lock order identical to issuance/reset.
+      const account = await one(
+        c,
+        "SELECT status FROM users WHERE id=$1 FOR UPDATE",
+        [s.user_id],
+      );
+      if (!account || account.status !== "pending_email") return false;
       const item = await one(
         c,
         "SELECT * FROM challenges WHERE id=$1 AND user_id=$2 AND purpose='email' FOR UPDATE",
@@ -400,10 +425,28 @@ export async function buildApp() {
     );
     const password = await argon2.hash(b.password);
     await tx(async (c) => {
+      // Read only the owner first; lock/recheck the account before the challenge
+      // so a status change cannot be bypassed and issuance cannot invert locks.
+      const owner = await one(
+        c,
+        "SELECT user_id FROM challenges WHERE id=$1 AND purpose='reset'",
+        [b.challengeId],
+      );
+      const account =
+        owner &&
+        (await one(c, "SELECT status FROM users WHERE id=$1 FOR UPDATE", [
+          owner.user_id,
+        ]));
+      if (!account || ["suspended", "deleted"].includes(account.status))
+        return fail(
+          422,
+          "INVALID_TOKEN",
+          "Reset link is expired, invalid or used.",
+        );
       const item = await one(
         c,
-        "SELECT * FROM challenges WHERE id=$1 AND purpose='reset' FOR UPDATE",
-        [b.challengeId],
+        "SELECT * FROM challenges WHERE id=$1 AND user_id=$2 AND purpose='reset' FOR UPDATE",
+        [b.challengeId, owner.user_id],
       );
       if (
         !item ||
@@ -927,8 +970,7 @@ export async function buildApp() {
           "VERSION_CONFLICT",
           "This plan changed. Refresh and try again.",
         );
-      if (["cancelled", "expired", "completed"].includes(p.status))
-        return fail(409, "PLAN_CLOSED", "This plan is closed.");
+      assertPlanningOpen(p);
       if (
         (
           await c.query(
@@ -1018,6 +1060,12 @@ export async function buildApp() {
       const b = body(r, z.object({ expectedVersion: z.number().int() }));
       if (p.version !== b.expectedVersion)
         return fail(409, "VERSION_CONFLICT", "Plan changed. Refresh first.");
+      if (p.status === "completed")
+        return fail(
+          409,
+          "PLAN_CLOSED",
+          "A completed plan cannot be cancelled.",
+        );
       await cancelPlan(c, p);
       return ok({
         cancelled: true,

@@ -264,7 +264,20 @@ export async function planDTO(c: Conn | typeof db, p: any, user: string) {
     partnerPaid: paid.some((r) => r.buyer_id !== user && r.state === "paid"),
   };
 }
+export function assertPlanningOpen(p: any) {
+  if (!p) return fail(404, "UNAVAILABLE", "Plan unavailable.");
+  if (
+    ["cancelled", "expired", "confirmed", "completed"].includes(p.status) ||
+    new Date(p.expires_at).getTime() <= Date.now()
+  )
+    return fail(409, "PLAN_CLOSED", "This plan cannot be edited or replanned.");
+}
 export async function options(c: Conn | typeof db, plan: string) {
+  assertPlanningOpen(
+    await one(c, "SELECT status,expires_at FROM date_plans WHERE id=$1", [
+      plan,
+    ]),
+  );
   const prefs = (
     await c.query("SELECT * FROM private_date_preferences WHERE plan_id=$1", [
       plan,
@@ -297,8 +310,7 @@ export async function savePreferences(
   user: string,
   body: any,
 ) {
-  if (["cancelled", "expired", "confirmed"].includes(p.status))
-    return fail(409, "PLAN_CLOSED", "This plan cannot be edited.");
+  assertPlanningOpen(p);
   await c.query(
     "INSERT INTO private_date_preferences(plan_id,user_id,budget_encrypted,activities,time_start,time_end) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(plan_id,user_id) DO UPDATE SET budget_encrypted=EXCLUDED.budget_encrypted,activities=EXCLUDED.activities,time_start=EXCLUDED.time_start,time_end=EXCLUDED.time_end",
     [
@@ -333,7 +345,7 @@ export async function cancelPlan(c: Conn, p: any) {
   // preserve terminal/pending refund evidence and the worker's existing schedule.
   // recordOrder independently rearms compensation for a genuinely new late capture.
   const changed = await c.query(
-    "UPDATE date_plans SET status='cancelled',financial_state=CASE WHEN EXISTS(SELECT 1 FROM purchases WHERE plan_id=$1) THEN 'reconciliation_pending' ELSE 'unpaid' END WHERE id=$1 AND status NOT IN ('cancelled','expired') RETURNING id",
+    "UPDATE date_plans SET status='cancelled',financial_state=CASE WHEN EXISTS(SELECT 1 FROM purchases WHERE plan_id=$1) THEN 'reconciliation_pending' ELSE 'unpaid' END WHERE id=$1 AND status NOT IN ('cancelled','expired','completed') RETURNING id",
     [p.id],
   );
   if (!changed.rowCount) return;
