@@ -1,0 +1,7 @@
+node_modules
+.next
+dist
+work
+.data
+pnpm-lock.yaml
+docs/MASTER_BUILD_PROMPT.md

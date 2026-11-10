@@ -1,0 +1,47 @@
+name: BaePal checks
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_USER: baepal
+          POSTGRES_PASSWORD: ci_only
+          POSTGRES_DB: baepal_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd 'pg_isready -U baepal'
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://baepal:ci_only@127.0.0.1:5432/baepal_test
+      APP_ORIGIN: http://localhost:3000
+      SESSION_SECRET: ci-only-synthetic-secret-with-32-characters
+      FIELD_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000001"
+      DEMO_MODE: "true"
+      PAYPAL_MODE: mock
+      EMAIL_MODE: local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: node scripts/check-artifacts.mjs
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm db:migrate && pnpm db:seed
+      - run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-traces
+          path: test-results/

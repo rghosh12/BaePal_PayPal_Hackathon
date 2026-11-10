@@ -16,3 +16,9 @@ test-results/
 # Local files
 .DS_Store
 *.log
+
+work/
+.data/
+*.tsbuildinfo
+
+apps/web/next-env.d.ts

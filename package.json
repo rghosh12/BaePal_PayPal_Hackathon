@@ -1,0 +1,31 @@
+{
+  "name": "baepal",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=22.21.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k 'pnpm dev:api' 'pnpm dev:web'",
+    "dev:api": "pnpm --filter @baepal/api dev",
+    "dev:web": "pnpm --filter @baepal/web dev",
+    "db:migrate": "pnpm --filter @baepal/api migrate",
+    "db:seed": "pnpm --filter @baepal/api seed",
+    "test": "bash scripts/test.sh",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint .",
+    "build": "pnpm -r build",
+    "test:e2e": "playwright test",
+    "format": "prettier --write apps scripts docs *.json *.yaml *.mjs .github"
+  },
+  "devDependencies": {
+    "concurrently": "9.2.1",
+    "typescript": "5.9.3",
+    "@types/node": "24.10.1",
+    "eslint": "10.14.0",
+    "typescript-eslint": "8.72.2",
+    "prettier": "3.9.10",
+    "@playwright/test": "1.65.0"
+  }
+}

@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: baepal
+      POSTGRES_PASSWORD: local_only
+      POSTGRES_DB: baepal
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["baepal-db:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U baepal"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+volumes:
+  baepal-db:
