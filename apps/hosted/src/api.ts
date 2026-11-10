@@ -503,15 +503,20 @@ export async function handleAPI(request: Request, env: Env): Promise<Response> {
       if (/^\/conversations\/[\w-]+\/messages$/.test(path)) {
         const mid = id.parse(path.split("/")[2]);
         matchFor(s, mid, u);
-        const after = z.coerce
-          .number()
-          .int()
-          .min(0)
-          .default(0)
-          .parse(url.searchParams.get("after") || 0);
+        if (url.searchParams.getAll("after").length > 1)
+          return fail(400, "VALIDATION", "Provide one message cursor.");
+        const after = z
+          .string()
+          .max(16)
+          .regex(/^\d+$/)
+          .default("0")
+          .transform(Number)
+          .pipe(z.number().int().min(0).max(Number.MAX_SAFE_INTEGER))
+          .parse(url.searchParams.get("after") ?? undefined);
         return s.messages
           .filter((m) => m.match_id === mid && m.sequence > after)
-          .slice(-200);
+          .sort((a, b) => a.sequence - b.sequence || a.id.localeCompare(b.id))
+          .slice(0, 100);
       }
       if (path === "/date-plans")
         return s.plans

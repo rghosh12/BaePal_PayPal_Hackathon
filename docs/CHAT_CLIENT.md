@@ -1,0 +1,11 @@
+# Chat paging and recovery client
+
+`ChatThread` keeps its fetched message history separate from the page-level account refresh. It merges ascending sequence pages by message identity/sequence, advances the catch-up cursor only through fetched pages, and never advances past a gap because a send acknowledgement arrived early. Each refresh fetches at most five 100-row pages; a continuation button remains available when another batch is needed. Polling, online recovery and socket reconnection use this same catch-up path. A successful conversation-subscription acknowledgement triggers another catch-up, covering messages that arrive between the initial fetch and joining the socket room.
+
+Drafts and uncertain-send request IDs live only in a bounded, 20-conversation in-memory map keyed by actor and conversation. They survive client-side navigation and network refreshes, not a document reload or browser restart. A retry of unchanged text reuses its request ID. The cache clears on logout, verified actor change or revoked access. No dating text is written to localStorage, URLs or server-side draft storage.
+
+A send verifies the current actor and binds that response's CSRF token to its own request, without letting stale account reads change another actor's global session state. A CSRF refresh failure retains the draft/request key for retry. Authenticated message reads returning 401/403/404 and access-revoked events clear visible messages, clear the scoped draft and disable the composer. Request epochs, identity checks, abort signals and route/request guards prevent late responses from restoring revoked or navigated-away content.
+
+The UI distinguishes loading, bounded/incomplete history, refreshing, offline/reconnecting, failed sends and unavailable conversations. “Saved” means the server acknowledged persistence; no delivered/read status is claimed. Sending remains an explicit retry after an uncertain response, with the same idempotency key.
+
+Seven pure helper tests cover paging beyond 100, continuation bounds, early acknowledgements, deduplication, stale revocation responses, actor/conversation draft isolation, logout and malformed pages. Real browser validation runs in CI; these helpers alone do not prove browser behavior. Broader #4 still includes durable cross-device history/operational recovery requirements outside this client slice.

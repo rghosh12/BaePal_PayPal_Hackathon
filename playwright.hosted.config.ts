@@ -13,7 +13,7 @@ export default defineConfig({
   ],
   webServer: {
     command:
-      "BAEPAL_HOSTED_TEST_SERVER=1 node apps/hosted/scripts/test-server.mjs",
+      "BAEPAL_HOSTED_TEST_SERVER=1 BAEPAL_HOSTED_CHAT_FIXTURE=1 pnpm --filter @baepal/hosted exec tsx scripts/test-server.mjs",
     url: "http://localhost:4173/api/v1/health",
     reuseExistingServer: false,
   },
