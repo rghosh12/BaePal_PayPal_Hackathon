@@ -2,7 +2,11 @@ import { paymentResponse } from "./response-contracts.js";
 import { randomUUID } from "node:crypto";
 import { db, one, tx } from "./db.js";
 import { config } from "./config.js";
-import { provider, verifiedCapture } from "./providers/paypal.js";
+import {
+  provider,
+  verifiedCapture,
+  verifiedRefund,
+} from "./providers/paypal.js";
 import { fail, planFor } from "./domain.js";
 export async function ownPayment(user: string, id: string) {
   const p = await one(
@@ -217,14 +221,7 @@ async function refundPayment(pay: any) {
       refund.amount_cents,
       refund.id,
     );
-  if (!result.id) throw Error("Refund evidence unavailable");
-  if (
-    result.status === "COMPLETED" &&
-    config.PAYPAL_MODE === "sandbox" &&
-    (result.amount?.currency_code !== "USD" ||
-      Number(result.amount?.value) * 100 !== refund.amount_cents)
-  )
-    throw Error("Refund amount mismatch");
+  verifiedRefund(result, refund.amount_cents);
   await tx(async (c) => {
     await c.query("SELECT id FROM payments WHERE id=$1 FOR UPDATE", [pay.id]);
     const completed = result.status === "COMPLETED";
@@ -313,6 +310,85 @@ async function finishCancellation(job: any, failed = false) {
       );
   });
 }
+const WEBHOOK_ATTEMPT_LIMIT = 8;
+async function deferWebhook(event: any, reason: string, quarantine = false) {
+  const attempts = event.attempts + 1;
+  const exhausted = attempts >= WEBHOOK_ATTEMPT_LIMIT;
+  const delay = Math.min(300, 5 * 2 ** Math.min(event.attempts, 6));
+  await db.query(
+    "UPDATE webhook_inbox SET attempts=attempts+1,state=$3,last_error=$4,available_at=now()+($5::integer * interval '1 second') WHERE event_id=$1 AND state='pending' AND attempts=$2",
+    [
+      event.event_id,
+      event.attempts,
+      quarantine || exhausted ? "quarantined" : "pending",
+      reason,
+      delay,
+    ],
+  );
+}
+async function reconcileWebhook(event: any) {
+  // Inbox rows are accepted only after signature verification at the HTTP boundary.
+  // Unsupported events remain inspectable; they never trigger speculative mutations.
+  if (event.mode !== config.PAYPAL_MODE)
+    return deferWebhook(event, "MODE_MISMATCH", true);
+  const type = event.payload?.event_type;
+  if (!["PAYMENT.CAPTURE.COMPLETED", "PAYMENT.CAPTURE.PENDING"].includes(type))
+    return deferWebhook(event, "UNSUPPORTED_EVENT", true);
+  const reference = (value: unknown) =>
+    typeof value === "string" && value.length > 0 && value.length <= 200
+      ? value
+      : null;
+  const orderId = reference(
+    event.payload?.resource?.supplementary_data?.related_ids?.order_id,
+  );
+  const captureId = reference(event.payload?.resource?.id);
+  if (!orderId && !captureId)
+    return deferWebhook(event, "MALFORMED_REFERENCE", true);
+  const pay = await one(
+    db,
+    "SELECT * FROM payments WHERE mode=$3 AND (($1::text IS NOT NULL AND order_id=$1) OR ($2::text IS NOT NULL AND capture_id=$2))",
+    [orderId, captureId, event.mode],
+  );
+  if (!pay?.order_id) return deferWebhook(event, "CORRELATION_MISSING");
+  // Both provided references must belong to this order/capture, even when the OR
+  // correlation found one of them. Financial status still comes from getOrder.
+  if (
+    (orderId && pay.order_id !== orderId) ||
+    (captureId && pay.capture_id && pay.capture_id !== captureId)
+  )
+    return deferWebhook(event, "CAPTURE_REFERENCE_MISMATCH", true);
+  let order;
+  try {
+    order = await provider.getOrder(pay.order_id);
+  } catch {
+    return deferWebhook(event, "PROVIDER_UNAVAILABLE");
+  }
+  if (!order || typeof order !== "object" || order.id !== pay.order_id)
+    return deferWebhook(event, "PROVIDER_EVIDENCE_INVALID");
+  const capture = order.purchase_units?.[0]?.payments?.captures?.[0];
+  if (
+    capture &&
+    (!reference(capture.id) || (captureId && capture.id !== captureId))
+  )
+    return deferWebhook(event, "CAPTURE_REFERENCE_MISMATCH", true);
+  try {
+    await recordOrder(pay.id, order);
+  } catch {
+    return deferWebhook(event, "PROVIDER_EVIDENCE_INVALID");
+  }
+  const actual = await one(db, "SELECT state FROM payments WHERE id=$1", [
+    pay.id,
+  ]);
+  const accepted =
+    type === "PAYMENT.CAPTURE.COMPLETED"
+      ? ["completed", "refunded"].includes(actual?.state)
+      : ["pending", "completed", "refunded"].includes(actual?.state);
+  if (!accepted) return deferWebhook(event, "PROVIDER_EVIDENCE_PENDING");
+  await db.query(
+    "UPDATE webhook_inbox SET state='processed',attempts=attempts+1,last_error=NULL,processed_at=now() WHERE event_id=$1 AND state='pending' AND attempts=$2",
+    [event.event_id, event.attempts],
+  );
+}
 let running = false;
 export async function workerTick() {
   if (running) return;
@@ -337,27 +413,14 @@ export async function workerTick() {
     });
     const inbox = (
       await db.query(
-        "SELECT * FROM webhook_inbox WHERE state='pending' ORDER BY created_at LIMIT 20",
+        "SELECT * FROM webhook_inbox WHERE state='pending' AND available_at<=now() ORDER BY available_at,created_at,event_id LIMIT 20",
       )
     ).rows;
     for (const event of inbox) {
       try {
-        const orderId =
-          event.payload.resource?.supplementary_data?.related_ids?.order_id;
-        const captureId = event.payload.resource?.id;
-        const pay = await one(
-          db,
-          "SELECT * FROM payments WHERE order_id=$1 OR capture_id=$2",
-          [orderId || "", captureId || ""],
-        );
-        if (pay && pay.order_id)
-          await recordOrder(pay.id, await provider.getOrder(pay.order_id));
-        await db.query(
-          "UPDATE webhook_inbox SET state='processed' WHERE event_id=$1",
-          [event.event_id],
-        );
+        await reconcileWebhook(event);
       } catch {
-        /* Retry durable inbox; no payload logging. */
+        await deferWebhook(event, "RECONCILIATION_UNAVAILABLE");
       }
     }
     const pending = (

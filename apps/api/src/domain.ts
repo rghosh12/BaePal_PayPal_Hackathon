@@ -284,8 +284,14 @@ export async function options(c: Conn | typeof db, plan: string) {
     ])
   ).rows;
   if (prefs.length !== 2) return [];
-  const start = Math.max(...prefs.map((p) => new Date(p.time_start).getTime()));
+  // Use one clock sample for every option; elapsed availability is not reusable.
+  const now = Date.now();
+  const start = Math.max(
+    now,
+    ...prefs.map((p) => new Date(p.time_start).getTime()),
+  );
   const end = Math.min(...prefs.map((p) => new Date(p.time_end).getTime()));
+  if (start >= end) return [];
   const items = (
     await c.query("SELECT * FROM catalogue ORDER BY price_cents,id")
   ).rows;
