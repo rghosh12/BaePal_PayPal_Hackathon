@@ -2079,3 +2079,11 @@ code {
     white-space: normal;
   }
 }
+
+/* Keep offscreen accessible table labels inside the scroll region's containing block. */
+.taste-table-wrap {
+  position: relative;
+}
+.taste-table label {
+  position: relative;
+}
