@@ -10,6 +10,8 @@ import Link from "next/link";
 import IntegrationWorkspace from "./IntegrationWorkspace";
 import TasteWorkspace from "./TasteWorkspace";
 import MatchWhy from "./MatchWhy";
+import ChatThread from "./ChatThread";
+import { activateChatActor, chatScope, revokeChat } from "./chat-state";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Heart,
@@ -30,7 +32,6 @@ import {
   Leaf,
   Coffee,
   Palette,
-  Send,
   Menu,
   Receipt,
   LoaderCircle,
@@ -58,129 +59,257 @@ export default function BaePal() {
     [notice, setNotice] = useState(""),
     [loading, setLoading] = useState(true),
     [busy, setBusy] = useState(false),
-    [menu, setMenu] = useState(false);
+    [menu, setMenu] = useState(false),
+    [chatRefresh, setChatRefresh] = useState(0),
+    [chatUnavailable, setChatUnavailable] = useState(""),
+    [chatTransport, setChatTransport] = useState("connecting");
   const csrf = useRef("");
   const configCache = useRef<Row | null>(null);
   const socket = useRef<Socket | null>(null);
-  const retryMessage = useRef<{ text: string; id: string } | null>(null);
+  const refreshSequence = useRef(0),
+    routeRef = useRef(path),
+    currentActor = useRef<string | null>(null),
+    alive = useRef(true);
+  if (routeRef.current !== path) {
+    routeRef.current = path;
+    refreshSequence.current++;
+  }
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      refreshSequence.current++;
+    };
+  }, []);
   const api = useCallback(
-    async (url: string, method = "GET", payload?: unknown) => {
+    async (
+      url: string,
+      method = "GET",
+      payload?: unknown,
+      signal?: AbortSignal,
+      csrfOverride?: string,
+    ) => {
       const r = await fetch(`/api/v1${url}`, {
         method,
         headers: {
           "Content-Type": "application/json",
-          ...(csrf.current ? { "x-csrf-token": csrf.current } : {}),
+          ...((csrfOverride ?? csrf.current)
+            ? { "x-csrf-token": csrfOverride ?? csrf.current }
+            : {}),
         },
         body: payload === undefined ? undefined : JSON.stringify(payload),
         cache: "no-store",
+        signal,
       });
       const result = await r.json();
       if (!r.ok) {
         const e = new Error(
           result.error?.message || "Request failed. Please retry.",
-        ) as Error & { status: number };
+        ) as Error & { status: number; code?: string };
         e.status = r.status;
+        e.code = result.error?.code;
         throw e;
       }
-      if (result.data?.csrf) csrf.current = result.data.csrf;
+      if (method !== "GET" && result.data?.csrf)
+        csrf.current = result.data.csrf;
       return result.data;
     },
     [],
   );
-  const refresh = useCallback(async () => {
-    const conf = configCache.current || (await api("/config"));
-    configCache.current = conf;
-    setConfig(conf);
-    let current;
-    try {
-      current = await api("/me");
-      setMe(current);
-    } catch (e) {
-      if ((e as any).status !== 401) throw e;
+  const onChatUnavailable = useCallback((status: number, scope: string) => {
+    const mid = routeRef.current.startsWith("/chats/")
+      ? routeRef.current.split("/")[2]
+      : "";
+    if (!currentActor.current || scope !== chatScope(currentActor.current, mid))
+      return;
+    revokeChat(scope);
+    setChatUnavailable(scope);
+    setMatches((previous) => previous.filter((match) => match.id !== mid));
+    setNotice(
+      "This conversation is unavailable. Messages and drafts have been cleared.",
+    );
+    if (status === 401) {
+      refreshSequence.current++;
+      activateChatActor(null);
+      currentActor.current = null;
+      csrf.current = "";
       setMe(null);
+      setMatches([]);
+      setData(null);
     }
-    if (current && ["active", "paused"].includes(current.status)) {
-      const m = await api("/matches");
+  }, []);
+  const refresh = useCallback(async () => {
+    const sequence = ++refreshSequence.current;
+    const currentRequest = () =>
+      alive.current &&
+      sequence === refreshSequence.current &&
+      routeRef.current === path;
+    try {
+      const conf = configCache.current || (await api("/config"));
+      let current;
+      try {
+        current = await api("/me");
+      } catch (e) {
+        if ((e as any).status !== 401) throw e;
+      }
+      if (!currentRequest()) return;
+      if (!current) {
+        activateChatActor(null);
+        currentActor.current = null;
+        csrf.current = "";
+        setMe(null);
+        setMatches([]);
+        setData(null);
+        setConfig(conf);
+        configCache.current = conf;
+        return;
+      }
+      const active = ["active", "paused"].includes(current.status);
+      const m = active ? await api("/matches") : [];
+      let fresh: any,
+        hasData = false,
+        datePlan = false;
+      if (active) {
+        if (path === "/discover") {
+          fresh = await api("/discover");
+          hasData = true;
+        } else if (path === "/chats" || path === "/matches") {
+          fresh = m;
+          hasData = true;
+        } else if (path === "/dates") {
+          fresh = await api("/date-plans");
+          hasData = true;
+        } else if (path.startsWith("/dates/") && path !== "/dates/new") {
+          fresh = await api(`/date-plans/${path.split("/")[2]}`);
+          hasData = true;
+          datePlan = true;
+        } else if (path.startsWith("/checkout/")) {
+          fresh = await api(`/purchases/${path.split("/")[2]}`);
+          hasData = true;
+        } else if (path === "/payments") {
+          fresh = await api("/payments");
+          hasData = true;
+        } else if (path.startsWith("/payments/")) {
+          fresh = await api(`/payments/${path.split("/")[2]}`);
+          hasData = true;
+        } else if (path === "/admin/reports") {
+          fresh = await api("/admin/reports");
+          hasData = true;
+        }
+      }
+      if (!currentRequest()) return;
+      if (currentActor.current !== current.id) setChatUnavailable("");
+      activateChatActor(current.id);
+      currentActor.current = current.id;
+      csrf.current = current.csrf || "";
+      setMe(current);
+      setConfig(conf);
+      configCache.current = conf;
       setMatches(m);
-      if (path === "/discover") setData(await api("/discover"));
-      else if (path === "/chats" || path === "/matches") setData(m);
-      else if (path.startsWith("/chats/"))
-        setData(await api(`/conversations/${path.split("/")[2]}/messages`));
-      else if (path === "/dates") setData(await api("/date-plans"));
-      else if (path.startsWith("/dates/") && path !== "/dates/new") {
-        const fresh = await api(`/date-plans/${path.split("/")[2]}`);
-        setData((previous: any) => ({
-          ...fresh,
-          ...(previous?.id === fresh.id &&
-          previous.version === fresh.version &&
-          previous.suggestions
-            ? { suggestions: previous.suggestions }
-            : {}),
-        }));
-      } else if (path.startsWith("/checkout/"))
-        setData(await api(`/purchases/${path.split("/")[2]}`));
-      else if (path === "/payments") setData(await api("/payments"));
-      else if (path.startsWith("/payments/"))
-        setData(await api(`/payments/${path.split("/")[2]}`));
-      else if (path === "/admin/reports") setData(await api("/admin/reports"));
+      if (hasData)
+        setData((previous: any) => {
+          if (!currentRequest()) return previous;
+          return datePlan
+            ? {
+                ...fresh,
+                ...(previous?.id === fresh.id &&
+                previous.version === fresh.version &&
+                previous.suggestions
+                  ? { suggestions: previous.suggestions }
+                  : {}),
+              }
+            : fresh;
+        });
+      if (path.startsWith("/chats/")) setChatRefresh((value) => value + 1);
+      return current;
+    } catch (error) {
+      if (
+        currentRequest() &&
+        path.startsWith("/chats/") &&
+        [401, 403, 404].includes((error as any).status) &&
+        currentActor.current
+      )
+        onChatUnavailable(
+          (error as any).status,
+          chatScope(currentActor.current, path.split("/")[2]),
+        );
+      throw error;
     }
-    return current;
-  }, [api, path]);
+  }, [api, path, onChatUnavailable]);
   useEffect(() => {
-    let alive = true;
+    let current = true;
     setLoading(true);
     setData(null);
     setError("");
     refresh()
-      .catch((e) => {
-        if (alive) setError(e.message);
+      .catch((error) => {
+        if (current) setError(error.message);
       })
       .finally(() => {
-        if (alive) setLoading(false);
+        if (current) setLoading(false);
       });
     return () => {
-      alive = false;
+      current = false;
     };
   }, [refresh]);
   useEffect(() => {
     if (!me || !["active", "paused"].includes(me.status)) return;
+    let current = true;
     const s = config.hosted
       ? null
       : io({ transports: ["polling"], upgrade: false });
     socket.current = s;
+    setChatTransport(config.hosted ? "polling" : "connecting");
     s?.on("connect", () => {
+      if (!current) return;
+      setChatTransport("connected");
+      setChatRefresh((value) => value + 1);
       if (path.startsWith("/chats/"))
-        s?.emit("conversation.subscribe", path.split("/")[2]);
+        s.emit("conversation.subscribe", path.split("/")[2], (result: any) => {
+          if (current && result?.error)
+            onChatUnavailable(404, chatScope(me.id, path.split("/")[2]));
+        });
     });
-    s?.on(
-      "message.created",
-      () =>
-        void refresh().catch(() =>
-          setError("Connection interrupted. Retry to refresh."),
-        ),
-    );
-    s?.on("match.created", () => void refresh().catch(() => {}));
-    s?.on("access.revoked", () => {
+    s?.on("disconnect", () => {
+      if (current) setChatTransport("reconnecting");
+    });
+    s?.on("connect_error", () => {
+      if (current) setChatTransport("reconnecting");
+    });
+    s?.on("message.created", () => {
+      if (current) setChatRefresh((value) => value + 1);
+    });
+    s?.on("match.created", () => {
+      if (current) void refresh().catch(() => {});
+    });
+    s?.on("access.revoked", (event: any) => {
+      if (!current) return;
+      if (
+        path.startsWith("/chats/") &&
+        (!event?.id || event.id === path.split("/")[2])
+      )
+        onChatUnavailable(404, chatScope(me.id, path.split("/")[2]));
       setData(null);
-      setNotice("Access has changed. This conversation may be unavailable.");
-      void refresh().catch((e) => setError(e.message));
+      void refresh().catch((error) => {
+        if (current) setError(error.message);
+      });
     });
     const timer = setInterval(() => {
       if (
         path === "/chats" ||
         path === "/dates" ||
-        path.startsWith("/chats/") ||
         path.startsWith("/dates/") ||
         path.startsWith("/payments/")
       )
         void refresh().catch(() => {});
     }, 5000);
     return () => {
+      current = false;
       s?.disconnect();
       clearInterval(timer);
       socket.current = null;
     };
-  }, [me?.id, me?.status, path, refresh, config.hosted]);
+  }, [me?.id, me?.status, path, refresh, config.hosted, onChatUnavailable]);
   async function act(fn: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
@@ -234,8 +363,17 @@ export default function BaePal() {
     { href: "/dates", label: "Dates", Icon: CalendarDays },
     { href: "/profile", label: "Profile", Icon: UserRound },
   ];
-  const button = (text: string, fn: () => Promise<void>, kind = "primary") => (
-    <button className={kind} disabled={busy} onClick={() => void act(fn)}>
+  const button = (
+    text: string,
+    fn: () => Promise<void>,
+    kind = "primary",
+    blocked = false,
+  ) => (
+    <button
+      className={kind}
+      disabled={busy || blocked}
+      onClick={() => void act(fn)}
+    >
       {busy ? <LoaderCircle size={17} className="spin" /> : null}
       {text}
     </button>
@@ -1337,95 +1475,31 @@ export default function BaePal() {
     );
   } else if (path.startsWith("/chats/")) {
     const mid = path.split("/")[2],
-      m = matches.find((m) => m.id === mid);
+      m = matches.find((m) => m.id === mid),
+      scope = chatScope(me?.id || "", mid),
+      chatClosed = chatUnavailable === scope;
     content = (
       <>
         {heading(
           "ONE CONVERSATION AT A TIME",
           m ? `You & ${m.profile.display_name}` : "Conversation",
         )}
-        {config.tasteMatching && (
+        {config.tasteMatching && !chatClosed && (
           <Link className="text-link" href={`/matches/${mid}/why`}>
             Why this match? <ArrowRight size={15} />
           </Link>
         )}
         <div className="chat-layout">
-          <div className="chat-panel panel">
-            <div className="chat-header">
-              <ShieldCheck size={18} />
-              <span>
-                Mutual connection · messages are not end-to-end encrypted
-              </span>
-            </div>
-            <div
-              className="messages"
-              role="log"
-              aria-label="Conversation messages"
-            >
-              {Array.isArray(data) &&
-                data.map((msg: Row) => (
-                  <div
-                    key={msg.id}
-                    className={`message ${msg.sender_id === me?.id ? "mine" : ""}`}
-                  >
-                    <p>{msg.text}</p>
-                    <span>
-                      {new Date(msg.created_at).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}{" "}
-                      · saved
-                    </span>
-                  </div>
-                ))}
-              {Array.isArray(data) && !data.length && (
-                <div className="empty">
-                  <Sparkles />
-                  <h2>Start with a little curiosity.</h2>
-                  <p>What’s something you’re looking forward to this week?</p>
-                </div>
-              )}
-            </div>
-            <form
-              className="composer"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const form = e.currentTarget;
-                const f = new FormData(form);
-                const text = String(f.get("text")).trim();
-                if (!text) return;
-                const key =
-                  retryMessage.current?.text === text
-                    ? retryMessage.current.id
-                    : crypto.randomUUID();
-                retryMessage.current = { text, id: key };
-                void act(async () => {
-                  await api(`/conversations/${mid}/messages`, "POST", {
-                    text,
-                    clientMessageId: key,
-                  });
-                  retryMessage.current = null;
-                  form.reset();
-                  await refresh();
-                });
-              }}
-            >
-              <label className="sr-only" htmlFor="message-text">
-                Your message
-              </label>
-              <input
-                id="message-text"
-                name="text"
-                maxLength={2000}
-                placeholder="A thoughtful hello…"
-                required
-                autoComplete="off"
-              />
-              <button aria-label="Send message" disabled={busy}>
-                <Send size={18} />
-              </button>
-            </form>
-          </div>
+          <ChatThread
+            key={scope}
+            actorId={me?.id || ""}
+            conversationId={mid}
+            api={api}
+            refreshToken={chatRefresh}
+            unavailable={chatClosed}
+            transport={chatTransport}
+            onUnavailable={onChatUnavailable}
+          />
           <aside className="form-stack">
             <div className="note-card lavender">
               <CalendarDays size={24} />
@@ -1434,10 +1508,15 @@ export default function BaePal() {
                 Find a date you can both feel good about. Your budget stays
                 yours.
               </p>
-              {button("Plan a date", async () => {
-                const p = await api("/date-plans", "POST", { matchId: mid });
-                go(`/dates/${p.id}`);
-              })}
+              {button(
+                "Plan a date",
+                async () => {
+                  const p = await api("/date-plans", "POST", { matchId: mid });
+                  go(`/dates/${p.id}`);
+                },
+                "primary",
+                chatClosed,
+              )}
             </div>
             {m && (
               <div className="note-card">
@@ -1457,6 +1536,7 @@ export default function BaePal() {
                     setNotice(result.message);
                   },
                   "secondary",
+                  chatClosed,
                 )}
                 {button(
                   "Block member",
@@ -1470,9 +1550,11 @@ export default function BaePal() {
                     await api("/blocks", "POST", {
                       targetId: m.profile.user_id,
                     });
+                    revokeChat(scope);
                     go("/chats");
                   },
                   "danger",
+                  chatClosed,
                 )}
                 {button(
                   "Unmatch",
@@ -1480,9 +1562,11 @@ export default function BaePal() {
                     if (!confirm("Close this match and cancel open plans?"))
                       return;
                     await api(`/matches/${mid}`, "DELETE");
+                    revokeChat(scope);
                     go("/chats");
                   },
                   "secondary",
+                  chatClosed,
                 )}
               </div>
             )}
@@ -2027,6 +2111,9 @@ export default function BaePal() {
                   )
                     return;
                   await api("/me", "DELETE", { password });
+                  refreshSequence.current++;
+                  activateChatActor(null);
+                  currentActor.current = null;
                   csrf.current = "";
                   setMe(null);
                   go("/");
@@ -2042,6 +2129,9 @@ export default function BaePal() {
               "Log out",
               async () => {
                 await api("/auth/logout", "POST", {});
+                refreshSequence.current++;
+                activateChatActor(null);
+                currentActor.current = null;
                 csrf.current = "";
                 setMe(null);
                 go("/");
@@ -2207,6 +2297,9 @@ export default function BaePal() {
                               email:
                                 name.toLowerCase() + "@demo.baepal.invalid",
                             });
+                            refreshSequence.current++;
+                            activateChatActor(null);
+                            currentActor.current = null;
                             // A fresh document resets drafts and any in-flight polling
                             // from the previous fictional actor before rendering the next.
                             window.location.reload();
