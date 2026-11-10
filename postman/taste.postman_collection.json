@@ -1,0 +1,842 @@
+{
+  "info": {
+    "name": "BaePal synthetic taste regression",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Isolated loopback Worker harness only. Fictional data; no PayPal history or payment evidence. Run pnpm test:postman. Never target the deployed Site with test-owner headers."
+  },
+  "item": [
+    {
+      "name": "Login as fictional Alex",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"email\":\"alex@demo.baepal.invalid\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.environment.set(\"csrf\", pm.response.json().data.csrf);",
+              "pm.environment.set(\"session_cookie\", pm.response.headers.get(\"set-cookie\").split(\";\")[0]);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Missing CSRF rejected",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "invalid"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/consents",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Foreign origin rejected",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "https://example.invalid"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/consents",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Real history remains unavailable",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/capabilities"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"No PayPal history capability\", () => pm.expect(pm.response.json().data.realHistoryEnabled).to.equal(false));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Separate purposes default off",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/profile"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"All purposes off\", () => pm.expect(Object.values(pm.response.json().data.consent.purposes)).to.deep.equal([false,false,false,false]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Import requires consent",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/demo-imports",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"datasetId\":\"weekend-reader\",\"idempotencyKey\":\"{{import_key}}\",\"consentVersion\":1}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Consent only to matching",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/consents",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"expectedVersion\":0,\"purposes\":{\"matching\":true,\"publicTags\":false,\"hostedAI\":false,\"commercial\":false},\"families\":[\"categories\",\"brands\",\"rhythms\"]}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.environment.set(\"consent_id\", pm.response.json().data.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Synthetic import",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/demo-imports",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"datasetId\":\"weekend-reader\",\"idempotencyKey\":\"{{import_key}}\",\"consentVersion\":1}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.environment.set(\"import_id\", pm.response.json().data.id);",
+              "pm.test(\"Synthetic source\", () => pm.expect(pm.response.json().data.sourceType).to.equal(\"synthetic\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Import replay keeps same job",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/demo-imports",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"datasetId\":\"weekend-reader\",\"idempotencyKey\":\"{{import_key}}\",\"consentVersion\":1}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Same import identity\", () => pm.expect(pm.response.json().data.id).to.equal(pm.environment.get(\"import_id\")));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Conflicting replay rejected",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/demo-imports",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"datasetId\":\"outdoor-explorer\",\"idempotencyKey\":\"{{import_key}}\",\"consentVersion\":1}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Evidence available for review",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/evidence"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Has synthetic records\", () => pm.expect(pm.response.json().data.total).to.be.above(0));",
+              "pm.environment.set(\"evidence_version\", pm.response.json().data.evidenceVersion);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Another workspace cannot read import",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{other_owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/imports/{{import_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Publish reviewed summary",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/rebuild",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"consentVersion\":1,\"expectedEvidenceVersion\":{{evidence_version}}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Feature active\", () => pm.expect(pm.response.json().data.featureActive).to.equal(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Real history sync blocked",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/paypal-sync",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Delete source consent",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/consents/{{consent_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Revocation clears evidence",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/evidence"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"No records remain\", () => pm.expect(pm.response.json().data.total).to.equal(0));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Revocation clears feature",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/profile"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"No active feature\", () => pm.expect(pm.response.json().data.featureActive).to.equal(false));",
+              "pm.test(\"No shared tags\", () => pm.expect(pm.response.json().data.sharedTags).to.deep.equal([]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stale import after revocation rejected",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "http://localhost:4173"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          },
+          {
+            "key": "x-baepal-test-owner",
+            "value": "{{owner}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/taste/demo-imports",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"datasetId\":\"weekend-reader\",\"idempotencyKey\":\"{{import_key}}\",\"consentVersion\":1}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

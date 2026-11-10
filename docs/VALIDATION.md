@@ -36,3 +36,7 @@ The private Site was successfully published with schema-only D1 migrations. Nati
 [Run 42741588672](https://github.com/rghosh12/BaePal_PayPal_Hackathon/actions/runs/42741588672) succeeded on commit `3e0bc26`: frozen installation, lint, workspace typechecks, 19 PostgreSQL/provider/socket tests, 2 hosted SQLite/D1-contract tests, all three builds, generated-interface consistency, artifact checks, and both Chromium browser scenarios. The full two-person journey persisted chat, saved both private budgets, accepted the same paid art proposal, captured two independent $30 mock tickets, and observed a confirmed plan. The 360px landing/login/safety overflow test also passed. This is mock payment/browser evidence, not a real PayPal Sandbox transaction or a full accessibility audit.
 
 The final hosted persona-switching refinement reloads the document after an explicit actor switch and keys content by selected persona. This resets uncontrolled forms/composers and in-flight polling from the previous actor, while ordinary same-persona polling preserves drafts.
+
+### Postman taste regression
+
+The `feature/postman-regression-suite` slice adds a real Newman 6.2.3 execution against the isolated Worker harness: 18 requests, 27 assertions, zero failures locally. CI runs `pnpm test:postman` after building the Worker. Coverage and remaining payment/Sandbox work are documented in `postman/README.md`; issue #29 remains open. This is synthetic local evidence only.
