@@ -1,0 +1,528 @@
+{
+  "info": {
+    "name": "BaePal manual Sandbox evidence (not executed)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "MANUAL ONLY. No Sandbox evidence has been recorded. Requires an original BaePal API configured for Sandbox, your own accepted plan, explicit enablement, manual buyer approval before capture and separate approval before cancellation. Never run this against the hosted mock Site. Read postman/README.md."
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const enabled=pm.environment.get(\"sandbox_execution_enabled\")===\"true\";",
+          "const base=pm.environment.get(\"base_url\") || \"\";",
+          "if (!enabled || !/^https:\\/\\//.test(base) || /example\\.(com|invalid|test)/.test(base)) pm.execution.skipRequest();"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Verify original API Sandbox mode",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/config"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.set(\"sandbox_verified\", \"false\");"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const verified=pm.response.code===200 && pm.response.json().data.paymentMode===\"sandbox\";",
+              "pm.environment.set(\"sandbox_verified\", verified ? \"true\" : \"false\");",
+              "pm.test(\"Actual BaePal API uses Sandbox\", () => pm.expect(verified).to.equal(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sign in with your own Sandbox app account",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"email\":\"{{email}}\",\"password\":\"{{password}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.environment.get(\"sandbox_verified\") !== \"true\") pm.execution.skipRequest();"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Authenticated\", () => pm.response.to.have.status(200));",
+              "pm.environment.set(\"csrf\", pm.response.json().data.csrf);",
+              "pm.environment.set(\"session_cookie\", pm.response.headers.get(\"set-cookie\").split(\";\")[0]);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create your already accepted Sandbox purchase",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/purchases",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"planId\":\"{{plan_id}}\",\"proposalVersion\":{{proposal_version}}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.environment.get(\"sandbox_verified\") !== \"true\") pm.execution.skipRequest();"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Purchase created\", () => pm.response.to.have.status(200));",
+              "pm.environment.set(\"purchase_id\", pm.response.json().data.purchaseId);",
+              "pm.environment.set(\"payment_id\", pm.response.json().data.paymentId);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create order then manually approve with Sandbox buyer",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/orders",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"paymentId\":\"{{payment_id}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.environment.get(\"sandbox_verified\") !== \"true\") pm.execution.skipRequest();"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Order created\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Actual Sandbox order\", () => pm.expect(pm.response.json().data.mode).to.equal(\"sandbox\"));",
+              "pm.environment.set(\"order_id\", pm.response.json().data.orderId);",
+              "pm.environment.set(\"approval_url\", pm.response.json().data.approvalUrl);",
+              "pm.environment.set(\"buyer_approval_confirmed\", \"false\");"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Capture only after explicit manual buyer approval",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/{{payment_id}}/capture",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.environment.get(\"sandbox_verified\") !== \"true\") pm.execution.skipRequest();",
+              "if (pm.environment.get(\"buyer_approval_confirmed\") !== \"true\") pm.execution.skipRequest();"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.set(\"buyer_approval_confirmed\", \"false\");",
+              "pm.test(\"Capture response recorded\", () => pm.expect([200,503]).to.include(pm.response.code));",
+              "if(pm.response.code===200) pm.test(\"Provider outcome retained\", () => pm.expect([\"completed\",\"pending\",\"unknown\",\"capture_pending\"]).to.include(pm.response.json().data.state));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Read your Sandbox receipt and immutable USD amount",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/{{payment_id}}"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.environment.get(\"sandbox_verified\") !== \"true\") pm.execution.skipRequest();"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Owner receipt\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Expected immutable amount\", () => pm.expect(pm.response.json().data.amount_cents).to.equal(Number(pm.environment.get(\"expected_amount_cents\"))));",
+              "pm.test(\"USD\", () => pm.expect(pm.response.json().data.currency).to.equal(\"USD\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reject unsigned Sandbox webhook",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/webhooks/paypal",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"id\":\"synthetic-unsigned-sandbox-check\",\"event_type\":\"PAYMENT.CAPTURE.COMPLETED\",\"resource\":{}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.environment.get(\"sandbox_verified\") !== \"true\") pm.execution.skipRequest();"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Unsigned webhook denied\", () => pm.response.to.have.status(403));",
+              "pm.test(\"Signature failure\", () => pm.expect(pm.response.json().error.code).to.equal(\"INVALID_SIGNATURE\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cancel only after explicit manual cancellation approval",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/date-plans/{{plan_id}}/cancel",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"expectedVersion\":{{proposal_version}}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.environment.get(\"sandbox_verified\") !== \"true\") pm.execution.skipRequest();",
+              "if (pm.environment.get(\"cancel_approved\") !== \"true\") pm.execution.skipRequest();"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.set(\"cancel_approved\", \"false\");",
+              "pm.test(\"Cancellation accepted\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Verify actual completed refund after reconciliation",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/{{payment_id}}"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.environment.get(\"sandbox_verified\") !== \"true\") pm.execution.skipRequest();"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Owner receipt\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Provider refund completion observed\", () => pm.expect(pm.response.json().data.state).to.equal(\"refunded\"));",
+              "pm.test(\"Refund evidence complete\", () => pm.expect(pm.response.json().data.refunds[0].state).to.equal(\"completed\"));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
