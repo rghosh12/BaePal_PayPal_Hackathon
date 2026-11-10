@@ -40,6 +40,49 @@ const env = {
     },
   },
 };
+// Browser-regression fixture only. It is never imported into the deployed
+// Worker, and default API/Postman harness runs leave it disabled. Run this
+// script through hosted tsx when enabling it so source store.ts can be loaded.
+if (process.env.BAEPAL_HOSTED_CHAT_FIXTURE === "1") {
+  const fixture = JSON.parse(
+    await readFile(new URL("./chat-fixture.json", import.meta.url), "utf8"),
+  );
+  const { mutate } = await import("../src/store.ts");
+  await mutate(fixture.owner, env, (state) => {
+    const alex = state.users.find(
+      (user) => user.email === "alex@demo.baepal.invalid",
+    );
+    const jordan = state.users.find(
+      (user) => user.email === "jordan@demo.baepal.invalid",
+    );
+    if (
+      !alex ||
+      !jordan ||
+      fixture.owner !== "ci-chat-history" ||
+      fixture.count !== 235
+    )
+      throw Error("Invalid fictional CI chat fixture.");
+    state.matches.push({
+      id: fixture.matchId,
+      low: alex.id,
+      high: jordan.id,
+      status: "active",
+      lastSequence: fixture.count,
+      created_at: "2026-11-10T00:00:00.000Z",
+    });
+    state.messages.push(
+      ...Array.from({ length: fixture.count }, (_, index) => ({
+        id: `22222222-2222-4222-8222-${String(index + 1).padStart(12, "0")}`,
+        match_id: fixture.matchId,
+        sequence: index + 1,
+        sender_id: index % 2 ? jordan.id : alex.id,
+        client_id: `33333333-3333-4333-8333-${String(index + 1).padStart(12, "0")}`,
+        text: fixture.prefix + String(index + 1).padStart(3, "0"),
+        created_at: new Date(Date.UTC(2026, 10, 10, 0, 0, index)).toISOString(),
+      })),
+    );
+  });
+}
 const server = createServer(async (req, res) => {
   try {
     const chunks = [];
