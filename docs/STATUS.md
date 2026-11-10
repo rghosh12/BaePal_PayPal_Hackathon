@@ -32,3 +32,7 @@ No live mode, payout, escrow, wallet, stored balance, subscriptions, or real mer
 ## Purchase-interest addendum
 
 Issues #22–#37 track the new brief. The first hosted slice provides synthetic evidence/consent/review, versioned deterministic purchase-pattern ranking, controlled explanations and immediate synthetic revocation; see [TASTE_MATCHING.md](TASTE_MATCHING.md). This is not proof of actual AI, Elastic, sponsor use or PayPal-history permission. [SPONSOR_STATUS.md](SPONSOR_STATUS.md) records the current gaps. Original broad issues remain open until all of their acceptance criteria pass.
+
+## Payment lifecycle refinements
+
+The Node API now preserves completed/pending refund state and expiry across cancellation retries, and rechecks consent expiry when a provider capture completes. A delayed second capture expires the plan and queues both payments for compensation instead of confirming it. Five dedicated PostgreSQL/mock-provider regressions cover these cases and authoritative late-capture recovery. Full distributed worker leases, partial refunds and real Sandbox evidence remain outstanding in #7/#8. The hosted mock adapter is separate and unchanged by this fix.

@@ -13,7 +13,7 @@ import { db, one } from "../src/db.js";
 import { migrate } from "../src/migrate.js";
 import { buildApp } from "../src/app.js";
 import { decide, sendMessage } from "../src/domain.js";
-import { workerTick } from "../src/payments.js";
+import { workerTick, recordOrder } from "../src/payments.js";
 import { ageOn, keyed } from "../src/crypto.js";
 import { config } from "../src/config.js";
 import { provider } from "../src/providers/paypal.js";
@@ -376,6 +376,194 @@ describe("real PostgreSQL access and consent invariants", () => {
     );
     await workerTick();
     expect((await one(db, "SELECT count(*)::int AS n FROM refunds")).n).toBe(2);
+  });
+  it("keeps completed refunds and processed jobs terminal across simultaneous cancellation retries", async () => {
+    const p = await accepted();
+    const purchase = await data(a, "POST", "/purchases", {
+      planId: p.id,
+      proposalVersion: 1,
+    });
+    await data(a, "POST", "/payments/orders", {
+      paymentId: purchase.paymentId,
+    });
+    await data(a, "POST", `/payments/${purchase.paymentId}/capture`, {});
+    const refunds = vi.spyOn(provider, "refundCapture");
+    await data(a, "POST", `/date-plans/${p.id}/cancel`, { expectedVersion: 1 });
+    await workerTick();
+    const original = await data(a, "GET", `/payments/${purchase.paymentId}`);
+    expect((await data(a, "GET", `/date-plans/${p.id}`)).financialState).toBe(
+      "refunded",
+    );
+    await Promise.all(
+      [a, b, a].map((u) =>
+        data(u, "POST", `/date-plans/${p.id}/cancel`, { expectedVersion: 1 }),
+      ),
+    );
+    await workerTick();
+    expect((await data(a, "GET", `/date-plans/${p.id}`)).financialState).toBe(
+      "refunded",
+    );
+    expect(await data(a, "GET", `/payments/${purchase.paymentId}`)).toEqual(
+      original,
+    );
+    expect(
+      (await one(db, "SELECT state FROM outbox WHERE aggregate_id=$1", [p.id]))
+        .state,
+    ).toBe("processed");
+    expect(
+      (
+        await one(
+          db,
+          "SELECT count(*)::int AS n FROM financial_events WHERE type='refund.completed'",
+        )
+      ).n,
+    ).toBe(1);
+    expect(refunds).toHaveBeenCalledTimes(1);
+  });
+  it("preserves pending refund evidence and its scheduled reconciliation on cancellation replay", async () => {
+    const p = await accepted();
+    const purchase = await data(a, "POST", "/purchases", {
+      planId: p.id,
+      proposalVersion: 1,
+    });
+    await data(a, "POST", "/payments/orders", {
+      paymentId: purchase.paymentId,
+    });
+    await data(a, "POST", `/payments/${purchase.paymentId}/capture`, {});
+    await data(a, "POST", `/date-plans/${p.id}/cancel`, { expectedVersion: 1 });
+    vi.spyOn(provider, "refundCapture").mockResolvedValue({
+      id: "pending-replay-refund",
+      status: "PENDING",
+    });
+    await workerTick();
+    const job = await one(
+      db,
+      "SELECT state,attempts,available_at FROM outbox WHERE aggregate_id=$1",
+      [p.id],
+    );
+    await data(b, "POST", `/date-plans/${p.id}/cancel`, { expectedVersion: 1 });
+    expect((await data(a, "GET", `/date-plans/${p.id}`)).financialState).toBe(
+      "refund_pending",
+    );
+    expect(
+      await one(
+        db,
+        "SELECT state,attempts,available_at FROM outbox WHERE aggregate_id=$1",
+        [p.id],
+      ),
+    ).toEqual(job);
+    expect(
+      (await data(a, "GET", `/payments/${purchase.paymentId}`)).refunds[0]
+        .state,
+    ).toBe("pending");
+  });
+  it("retains expired plan status when a stale cancel request arrives", async () => {
+    const p = await accepted();
+    await db.query(
+      "UPDATE date_plans SET expires_at=now()-interval '1 second' WHERE id=$1",
+      [p.id],
+    );
+    await workerTick();
+    expect((await data(a, "GET", `/date-plans/${p.id}`)).status).toBe(
+      "expired",
+    );
+    await data(a, "POST", `/date-plans/${p.id}/cancel`, { expectedVersion: 1 });
+    expect((await data(a, "GET", `/date-plans/${p.id}`)).status).toBe(
+      "expired",
+    );
+    expect((await data(a, "GET", `/date-plans/${p.id}`)).financialState).toBe(
+      "unpaid",
+    );
+  });
+  it("reopens compensation for authoritative late capture but not replayed capture evidence", async () => {
+    const p = await accepted();
+    const purchase = await data(a, "POST", "/purchases", {
+      planId: p.id,
+      proposalVersion: 1,
+    });
+    const order = await data(a, "POST", "/payments/orders", {
+      paymentId: purchase.paymentId,
+    });
+    await data(a, "POST", `/date-plans/${p.id}/cancel`, { expectedVersion: 1 });
+    await workerTick();
+    expect(
+      (await one(db, "SELECT state FROM outbox WHERE aggregate_id=$1", [p.id]))
+        .state,
+    ).toBe("processed");
+    // Simulate delayed provider completion observed through authoritative reconciliation.
+    const evidence = await provider.captureOrder(order.orderId, randomUUID());
+    await recordOrder(purchase.paymentId, evidence);
+    expect((await data(a, "GET", `/date-plans/${p.id}`)).financialState).toBe(
+      "reconciliation_pending",
+    );
+    expect(
+      (await one(db, "SELECT state FROM outbox WHERE aggregate_id=$1", [p.id]))
+        .state,
+    ).toBe("pending");
+    await workerTick();
+    expect(
+      (await data(a, "GET", `/payments/${purchase.paymentId}`)).state,
+    ).toBe("refunded");
+    await recordOrder(purchase.paymentId, evidence);
+    await data(a, "POST", `/date-plans/${p.id}/cancel`, { expectedVersion: 1 });
+    await workerTick();
+    expect((await data(a, "GET", `/date-plans/${p.id}`)).financialState).toBe(
+      "refunded",
+    );
+    expect(
+      (
+        await one(
+          db,
+          "SELECT count(*)::int AS n FROM refunds WHERE payment_id=$1",
+          [purchase.paymentId],
+        )
+      ).n,
+    ).toBe(1);
+  });
+  it("expires and compensates both payers when the second capture completes after consent expiry", async () => {
+    const p = await accepted();
+    const purchases = [];
+    for (const u of [a, b]) {
+      const purchase = await data(u, "POST", "/purchases", {
+        planId: p.id,
+        proposalVersion: 1,
+      });
+      purchases.push(purchase);
+      await data(u, "POST", "/payments/orders", {
+        paymentId: purchase.paymentId,
+      });
+    }
+    await data(a, "POST", `/payments/${purchases[0].paymentId}/capture`, {});
+    const capture = provider.captureOrder.bind(provider);
+    vi.spyOn(provider, "captureOrder").mockImplementation(async (...args) => {
+      const evidence = await capture(...args);
+      // Consent was valid when the provider call began, then expired in flight.
+      await db.query(
+        "UPDATE date_plans SET expires_at=now()-interval '1 second' WHERE id=$1",
+        [p.id],
+      );
+      return evidence;
+    });
+    await data(b, "POST", `/payments/${purchases[1].paymentId}/capture`, {});
+    const view = await data(a, "GET", `/date-plans/${p.id}`);
+    expect(view.status).toBe("expired");
+    expect(view.financialState).toBe("reconciliation_pending");
+    await workerTick();
+    expect((await data(a, "GET", `/date-plans/${p.id}`)).financialState).toBe(
+      "refunded",
+    );
+    for (const [index, u] of [a, b].entries())
+      expect(
+        (await data(u, "GET", `/payments/${purchases[index].paymentId}`)).state,
+      ).toBe("refunded");
+    expect(
+      (
+        await one(
+          db,
+          "SELECT count(*)::int AS n FROM refunds WHERE state='completed'",
+        )
+      ).n,
+    ).toBe(2);
   });
   it("blocks chat immediately while retaining the payer’s private receipt", async () => {
     const p = await accepted();
