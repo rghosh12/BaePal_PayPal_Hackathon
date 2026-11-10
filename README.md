@@ -1,25 +1,83 @@
-# BaePal — PayPal Hackathon
+# BaePal · PayPal Hackathon
 
-A mobile-first dating application concept for intentional relationships, private date-budget coordination, and voluntary date-experience purchases through PayPal Sandbox.
+A good connection deserves a good first date. BaePal is a Seattle-focused, mobile-first dating prototype with mutual matches, persisted chat, private budget coordination, versioned date consent, and independent demo ticket purchases.
 
-## Project status
+**Status: working local development prototype; P0 is not release-complete.** Mock payment tests pass against real PostgreSQL. Real PayPal Sandbox transactions and browser verification remain unverified. No live payments or real venue bookings are supported. Production startup is deliberately disabled.
 
-Specification repository. Application implementation has not started; no live payment integration or working product is included yet.
+## Quick start
 
-## Product specification
+Requires Node **24**, pnpm **11.25.0**, and Docker Compose. Commands run from this repository root.
 
-The original uploaded [master build prompt](docs/MASTER_BUILD_PROMPT.md) defines the product, architecture, P0/P1/P2 scope, security requirements, and release gates. The repository name follows the owner’s request: `BaePal_PayPal_Hackathon`.
+```bash
+pnpm install --frozen-lockfile
+node scripts/setup-local.mjs
+docker compose -p baepal -f infra/local/compose.yaml up -d
+pnpm db:migrate
+pnpm db:seed
+pnpm dev
+```
 
-## Initial implementation priorities
+Open **http://localhost:3000**. Web runs on 3000; API/Socket.IO and the in-process durable-job worker run on 4000. Keep both on the same trusted machine during local development. `.env.example` documents all implemented configuration; `setup-local.mjs` creates fresh session and encryption keys without overwriting an existing file.
 
-1. Establish the application architecture, pinned dependencies, database, and CI.
-2. Implement adult onboarding, profiles, reciprocal matching, and matched chat.
-3. Add private budgets, date proposals, and mutual acceptance.
-4. Integrate PayPal Sandbox orders, capture, receipts, refunds, and webhook reconciliation.
-5. Verify permissions, budget privacy, payment retries, blocking, and the two-person demo.
+Local demo sign-in buttons exist only with `DEMO_MODE=true`. Use **Alex** and **Jordan** in separate browser profiles or contexts. All 16 seeded accounts are fictional adults; original synthetic illustrations are labeled. Seed credentials are `<lowercase-name>@demo.baepal.invalid`, password `Demo-Only-2026!`. Never reuse these credentials in a real environment.
 
-Use the full specification for acceptance criteria. Demo experiences must be labeled fictional, and development adapters must never be presented as live integrations.
+Signup confirmation/reset messages go to the private local directory **`.data/mail/`**, not real email. Read the corresponding JSON file locally; the UI never displays OTPs. No production email adapter exists yet. Provider connections are unavailable and never receive fabricated badges.
 
-## Secrets
+## What works
 
-Keep credentials out of version control. Configure provider credentials locally or through deployment secrets when implementation begins.
+- Signup, hashed passwords, confirmation codes with expiry/attempt bounds/resend cooldown, password reset, revocable opaque cookie sessions, origin/CSRF protection.
+- Saved onboarding drafts, server-side adult checks, editable profiles, reciprocal age/gender/same-city discovery, like/pass, race-safe mutual matching.
+- Authorized REST and Socket.IO chat with persistence, ordered catch-up, deduplicated retries, block/report/unmatch and revocation; REST polling fallback.
+- Encrypted owner-scoped budgets, activity/time intersection, fictional catalogue suggestions, versioned proposals and mutual acceptance.
+- Independent immutable ticket purchases, retry-safe order/capture operations, receipts, refund jobs, expiry compensation, verified-webhook inbox and reconciliation worker.
+- Mock and PayPal Sandbox REST adapters, with separate evidence labels; live mode is unsupported.
+- Pause/resume, reauthenticated private export and dating-content deletion, role-restricted report queue and audited report state updates.
+
+See [feature gaps and release gates](docs/STATUS.md) before evaluating completeness. In particular, uploads currently provide technical validation and EXIF removal, **not content moderation**. Do not use real member data.
+
+## Verification
+
+Create a separate database; the suite refuses database names that do not end in `_test` and truncates only that database.
+
+```bash
+docker compose -p baepal -f infra/local/compose.yaml exec postgres \
+  psql -U baepal -c 'CREATE DATABASE baepal_test'
+pnpm test
+pnpm lint
+pnpm typecheck
+pnpm build
+```
+
+If the database already exists, skip its creation. `scripts/test.sh` defaults to local `baepal_test`; set `DATABASE_URL` to a dedicated test database when using different credentials. Results and limits: [VALIDATION.md](docs/VALIDATION.md).
+
+Browser tests are authored separately:
+
+```bash
+pnpm exec playwright install chromium
+pnpm test:e2e
+```
+
+Run browser tests against a **freshly seeded, disposable** development database. The two-person test consumes likes and creates purchases. Browser binaries were not installed or run in this managed environment because its browser-control tool was unavailable. CI includes browser installation and the test commands, but no GitHub CI run has been observed.
+
+## Architecture
+
+- `apps/web`: Next.js App Router/React/TypeScript, original responsive ivory/rose/lavender interface, accessible text controls alongside non-gesture discovery.
+- `apps/api`: Fastify, PostgreSQL via parameterized `pg`, Argon2id, Zod, AES-256-GCM field encryption, Socket.IO, image re-encoding with Sharp.
+- `db/migrations`: additive SQL migrations, explicit constraints and indexes; no automatic production schema push.
+- `apps/api/src/contracts.ts`: shared runtime request schemas and generated partial OpenAPI at `/api/v1/openapi.json`.
+- `apps/api/src/providers`: PayPal and deterministic planner interfaces/adapters. No AI model is claimed to run.
+- `infra/local`: local PostgreSQL; `.github/workflows/ci.yml`: frozen install, checks, DB tests, builds and browser smoke tests.
+
+The web server proxies `/api` and `/socket.io` to `API_ORIGIN`. Private screen data is requested with no-store fetches; the API rechecks session/resource ownership. Build and run the API as a persistent process for sockets and workers. See [architecture and permission map](docs/ARCHITECTURE.md), [API inventory](docs/API.md), and [dependency choices](docs/DEPENDENCIES.md).
+
+## Demo and payments
+
+Follow [the two-person judge script](docs/DEMO.md) and [Sandbox setup](docs/PAYPAL.md). Mock receipts are fixtures, not PayPal evidence. Live mode is rejected by configuration. Sandbox credentials must be configured through local/environment secret settings; never paste or commit them.
+
+To stop local services, stop `pnpm dev` and run `docker compose -p baepal -f infra/local/compose.yaml stop`. This preserves local data. No publicly reachable reset/delete-database endpoint exists.
+
+## Specification and ownership
+
+The uploaded [master prompt](docs/MASTER_BUILD_PROMPT.md) remains the source specification. The requested repository name is `BaePal_PayPal_Hackathon`. Code and illustrations were created for this prototype; third-party implementation/template code and photographs were not copied. [References](docs/REFERENCES.md) records what was actually inspected. A source license has not been selected by the owner.
+
+A local Git repository exists. Remote GitHub creation was denied by the connected credential's `createRepository` permission; no remote URL or successful push is claimed.

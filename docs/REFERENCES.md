@@ -1,0 +1,12 @@
+# Sources and original-asset boundaries
+
+- **Uploaded master prompt:** preserved in MASTER_BUILD_PROMPT.md. A separate `Pasted markdown.md` was referenced by that prompt but was not supplied here; its contents were not invented.
+- **Next.js installation documentation:** fetched `https://nextjs.org/docs/app/getting-started/installation`, including runtime/platform requirements and App Router setup. Version metadata separately checked from npm. No tutorial implementation copied.
+- **Fastify documentation:** fetched `https://fastify.dev/docs/latest/Guides/Getting-Started/` for current service setup. Fastify route/hooks, cookie and rate-limit plugins form the API boundary.
+- **PayPal:** fetched official Orders v2 (`https://developer.paypal.com/docs/api/orders/v2/`), Payments v2 (`https://developer.paypal.com/docs/api/payments/v2/`) and Webhooks v1 (`https://developer.paypal.com/docs/api/webhooks/v1/`) references. Confirmed create/get/capture, capture refund, refund detail and signature-verification endpoint families. Detailed behavior still requires configured Sandbox verification; fetched documentation is not transaction evidence.
+- **GroundUI dating category:** fetched `https://groundui.dev/mobile-app-categories/dating`. Inspected page text describes profile setup/visibility, discovery/connection states and messaging/report/block planning. Browser screenshots and paid templates were not inspected. No template code, screenshot, asset or access-right claim was copied.
+- **GitHub reference frontend:** the supplied prompt records its own earlier review at `b50b1b0ec3c3cc83cb657592e94b498f83bd35a4`. This implementation did not clone or copy its source and did not establish a source reuse license.
+- **DEV MERN tutorial:** contextual reference supplied by prompt only; no code reused and no MongoDB stack added.
+- **LinkedIn OIDC:** source named by prompt, not implemented here. Connection center explicitly reports unavailable instead of presenting email/provider connection as identity/employment verification.
+
+All six portrait assets are original SVG illustrations authored for fictional adult seed members. They are labeled illustrations, not real photos. No external fonts, scraped profiles, photos or paid assets were imported. Lucide icons are used through the pinned npm package under its upstream ISC license; other runtime packages retain their upstream licenses. The repository owner has not selected an overall source license.
