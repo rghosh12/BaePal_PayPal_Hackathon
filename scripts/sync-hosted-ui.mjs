@@ -20,3 +20,13 @@ for (const name of await readdir(new URL("apps/web/public/portraits/", root)))
 console.log(
   "Synced original BaePal interface and illustrations into the hosted app.",
 );
+
+await copyFile(
+  new URL("apps/web/src/components/TasteWorkspace.tsx", root),
+  new URL("apps/hosted/src/ui/TasteWorkspace.tsx", root),
+);
+
+await copyFile(
+  new URL("apps/web/src/components/MatchWhy.tsx", root),
+  new URL("apps/hosted/src/ui/MatchWhy.tsx", root),
+);

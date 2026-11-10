@@ -28,3 +28,7 @@ P0 is **not complete**. A private persistent prototype is deployed at https://ba
 5. Validate provider permissions, merchant fit, terms/cancellation support, backup/restore, human moderation, observability and financial incident response before any live deployment.
 
 No live mode, payout, escrow, wallet, stored balance, subscriptions, or real merchant booking is implemented. P1/P2 remain deferred. Working name does not imply PayPal affiliation or trademark clearance.
+
+## Purchase-interest addendum
+
+Issues #22–#37 track the new brief. The first hosted slice provides synthetic evidence/consent/review, versioned deterministic purchase-pattern ranking, controlled explanations and immediate synthetic revocation; see [TASTE_MATCHING.md](TASTE_MATCHING.md). This is not proof of actual AI, Elastic, sponsor use or PayPal-history permission. [SPONSOR_STATUS.md](SPONSOR_STATUS.md) records the current gaps. Original broad issues remain open until all of their acceptance criteria pass.

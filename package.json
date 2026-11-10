@@ -19,7 +19,8 @@
     "test:e2e": "playwright test",
     "format": "prettier --write apps scripts docs *.json *.yaml *.mjs .github",
     "build:prototype": "node scripts/sync-hosted-ui.mjs && pnpm --filter @baepal/hosted build",
-    "test:prototype": "pnpm --filter @baepal/hosted test"
+    "test:prototype": "pnpm --filter @baepal/hosted test",
+    "test:hosted:e2e": "playwright test --config playwright.hosted.config.ts"
   },
   "devDependencies": {
     "concurrently": "9.2.1",

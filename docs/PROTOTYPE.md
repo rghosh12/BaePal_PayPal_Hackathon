@@ -14,6 +14,10 @@ This is the fast iteration prototype requested by the owner. It is deployed, bac
 
 The two personas are controlled by you for testing. Every choice is explicit; the server does not impersonate a real member. All catalogues/illustrations are fictional and all hosted payments/refunds are mock. There is no PayPal call or real booking in the hosted demo. Professional connections and photo uploads are explicitly unavailable. You can also create one personal prototype profile, using fictional information, without entering a separate email/password.
 
+## Purchase interests
+
+Open **Purchase interests** after choosing a persona. Choose granular permissions, import a synthetic dataset, privately exclude/correct records, and explicitly publish a reviewed summary. On the seeded reader dataset, excluding the book merchant and republishing changes the next recommended person from Sam to Jordan. Neither raw histories nor internal scores appear on other profiles. Select separate sharing tags for mutual explanations; Stop & delete revokes use immediately. [Detailed workflow and limitations](TASTE_MATCHING.md).
+
 ## What is deployed
 
 - `apps/hosted`: React interface reused from the Next.js app, bundled into a self-contained Cloudflare Worker.
@@ -42,7 +46,7 @@ For schema changes, edit `apps/hosted/db/schema.ts`, then run `pnpm --filter @ba
 
 This owner-private prototype separates each owner's simulated environment. It is not cross-owner public member discovery. Real email/password auth, Argon2, media processing, realtime Socket.IO and the PayPal Sandbox adapter remain in the original local Node/PostgreSQL app. The hosting adapter offers a smaller self-contained deployment while those full-product requirements remain in the GitHub backlog.
 
-Workspace state is capped at 2 MB and 2,000 messages; this is a prototype data model, not a scale architecture. Mock cancellation/refund is immediate and labeled simulated; it does not demonstrate actual provider reconciliation. Full notification/retention/moderation, advanced filters, public sharing, real payments and real-member data are outside this deployment. No production readiness claim is made.
+Workspace state is capped at 750 KB of serialized UTF-8 before encryption (to stay below the D1 value limit after encryption/hex encoding) and 2,000 messages; this is a prototype data model, not a scale architecture. Mock cancellation/refund is immediate and labeled simulated; it does not demonstrate actual provider reconciliation. Full notification/retention/moderation, advanced filters, public sharing, real payments and real-member data are outside this deployment. No production readiness claim is made.
 
 ## Verified evidence
 
