@@ -22,7 +22,7 @@ Provider responses in these tests are mock fixtures. Real database execution pro
 
 - Real PayPal Sandbox approval/capture/refund/webhook: required merchant app/buyer credentials and HTTPS callback are not configured. No transaction evidence is claimed.
 - Browser screenshots, two-context Playwright journey, mobile overflow and accessibility/contrast audit: no `cua_repl.js` or other managed browser-control tool was available. The applicable [Sites skill](skill://plugin_connector_1p_689987207de08191979cf68eca2941c6/sites/SKILL.md) states: “If `cua_repl.js` is unavailable, skip browser QA: do not start a preview server, install a browser, or improvise another browser-control path.” Accordingly no preview or browser binary was started/installed here. Browser test source and CI commands are included, with no passing-browser claim.
-- GitHub remote creation/push: earlier attempts returned `Resource not accessible by integration (createRepository)`. Source remains local; no observed CI run.
+- GitHub repository creation was initially unavailable. On the subsequent publishing request the existing repository became accessible; its MIT license initialization was merged without rewriting history. CI results must be checked on the pushed commit; earlier local results do not establish a successful GitHub run.
 - Full master acceptance matrix (including partial refund races, real OAuth, media content moderation, complete export/retention, screen-reader and network failure audits) remains open in STATUS.md. All P0 completion claims are withheld.
 
 CI configuration exists but has not run on GitHub. No achieved p95 latency, conversion, accessibility score, or production reliability metric is claimed.

@@ -78,6 +78,6 @@ To stop local services, stop `pnpm dev` and run `docker compose -p baepal -f inf
 
 ## Specification and ownership
 
-The uploaded [master prompt](docs/MASTER_BUILD_PROMPT.md) remains the source specification. The requested repository name is `BaePal_PayPal_Hackathon`. Code and illustrations were created for this prototype; third-party implementation/template code and photographs were not copied. [References](docs/REFERENCES.md) records what was actually inspected. A source license has not been selected by the owner.
+The uploaded [master prompt](docs/MASTER_BUILD_PROMPT.md) remains the source specification. The requested repository name is `BaePal_PayPal_Hackathon`. Code and illustrations were created for this prototype; third-party implementation/template code and photographs were not copied. [References](docs/REFERENCES.md) records what was actually inspected. Source is licensed under the [MIT License](LICENSE), preserved from the GitHub repository initialization.
 
-A local Git repository exists. Remote GitHub creation was denied by the connected credential's `createRepository` permission; no remote URL or successful push is claimed.
+GitHub repository: https://github.com/rghosh12/BaePal_PayPal_Hackathon. The original GitHub license commit is preserved alongside the application history.
