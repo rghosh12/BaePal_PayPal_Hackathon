@@ -29,6 +29,7 @@ test("long chat catches up, retries a persisted send after lost ack, then clears
     const page = await alex.newPage();
     await page.goto("/auth/login");
     await page.getByRole("button", { name: "Continue as Alex" }).click();
+    await expect(page).toHaveURL(/\/discover$/);
     await page.goto(`/chats/${fixture.matchId}`);
     const log = page.getByRole("log", { name: "Conversation messages" });
     const rows = log.locator(".message p");
@@ -79,10 +80,11 @@ test("long chat catches up, retries a persisted send after lost ack, then clears
     const peerPage = await jordan.newPage();
     await peerPage.goto("/auth/login");
     await peerPage.getByRole("button", { name: "Continue as Jordan" }).click();
+    await expect(peerPage).toHaveURL(/\/discover$/);
     const peerResponse = await jordan.request.get("/api/v1/me", {
       headers: ownerHeaders,
     });
-    expect(peerResponse.ok()).toBe(true);
+    expect(peerResponse.status()).toBe(200);
     const peer = (await peerResponse.json()).data;
     const origin = new URL(page.url()).origin;
     const peerHeaders = { ...ownerHeaders, origin, "x-csrf-token": peer.csrf };
