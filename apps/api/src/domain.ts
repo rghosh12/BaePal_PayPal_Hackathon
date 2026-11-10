@@ -317,10 +317,14 @@ export async function savePreferences(
   }
 }
 export async function cancelPlan(c: Conn, p: any) {
-  await c.query(
-    "UPDATE date_plans SET status='cancelled',financial_state=CASE WHEN EXISTS(SELECT 1 FROM purchases WHERE plan_id=$1) THEN 'reconciliation_pending' ELSE 'unpaid' END WHERE id=$1",
+  // Transition only once against current database state. Retried cancellation must
+  // preserve terminal/pending refund evidence and the worker's existing schedule.
+  // recordOrder independently rearms compensation for a genuinely new late capture.
+  const changed = await c.query(
+    "UPDATE date_plans SET status='cancelled',financial_state=CASE WHEN EXISTS(SELECT 1 FROM purchases WHERE plan_id=$1) THEN 'reconciliation_pending' ELSE 'unpaid' END WHERE id=$1 AND status NOT IN ('cancelled','expired') RETURNING id",
     [p.id],
   );
+  if (!changed.rowCount) return;
   await c.query(
     "INSERT INTO outbox(id,kind,aggregate_id) VALUES($1,'cancel_plan',$2) ON CONFLICT DO NOTHING",
     [randomUUID(), p.id],

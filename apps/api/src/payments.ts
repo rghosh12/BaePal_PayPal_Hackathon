@@ -128,17 +128,24 @@ export async function recordOrder(id: string, order: any) {
       "SELECT * FROM date_plans WHERE id=$1 FOR UPDATE",
       [pay.plan_id],
     );
+    // Provider completion can arrive after consent expires, before the expiry
+    // worker runs. Check again under the plan lock before confirming either payer.
+    const consentExpired =
+      !["confirmed", "completed", "cancelled", "expired"].includes(
+        plan.status,
+      ) && new Date(plan.expires_at).getTime() <= Date.now();
     if (
       ["cancelled", "expired"].includes(plan.status) ||
-      plan.version !== pay.version
+      plan.version !== pay.version ||
+      consentExpired
     ) {
       await c.query(
         "INSERT INTO outbox(id,kind,aggregate_id) VALUES($1,'cancel_plan',$2) ON CONFLICT(kind,aggregate_id) DO UPDATE SET state='pending',available_at=now()",
         [randomUUID(), plan.id],
       );
       await c.query(
-        "UPDATE date_plans SET financial_state='reconciliation_pending' WHERE id=$1",
-        [plan.id],
+        "UPDATE date_plans SET status=CASE WHEN $2 THEN 'expired' ELSE status END,financial_state='reconciliation_pending' WHERE id=$1",
+        [plan.id, consentExpired],
       );
     } else {
       const count = await one(

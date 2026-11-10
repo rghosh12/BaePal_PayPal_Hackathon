@@ -44,3 +44,9 @@ The `feature/postman-regression-suite` slice adds a real Newman 6.2.3 execution 
 ### Secure integration hub
 
 The shared server-only hub adds nine contract/transport tests, bringing the local suites to 46 passing tests (9 shared, 20 PostgreSQL API, 17 hosted Worker). Both runtimes test the configured preview/planner connection points with isolated gateway fixtures. Lint, type checks and production builds pass; the existing Newman collection still passes 18 requests / 27 assertions. The new hosted browser check covers the Connected services page at 360px, disabled execution and absence of browser credential fields. CI is the browser execution environment. Real sponsor credentials and native provider executions remain unavailable; gateway fixtures do not establish native interoperability.
+
+### Cancellation replays and capture expiry
+
+Five PostgreSQL regressions reproduced two Node API lifecycle defects before the fix: cancelled/refunded or refund-pending plans regressed to reconciliation-pending on replay, expired plans changed to cancelled, and a second capture completing after consent expiry incorrectly confirmed the plan. Cancellation now performs a conditional database transition; replay leaves financial evidence, job completion and backoff unchanged. Capture reconciliation rechecks expiry under the plan lock and queues refunds for both payers instead of confirming an expired invitation. New authoritative late capture evidence still rearms compensation; duplicated evidence does not duplicate refunds.
+
+Local verification passed 51 tests (25 original API/provider, 17 hosted, 9 integration hub), lint, workspace typechecks and the Node API build. These financial regressions use the mock provider and a dedicated PostgreSQL test database. No real PayPal Sandbox completion, distributed-worker guarantee or hosted runtime change is implied. Issues #42 and #43 cover these defects; broader #7 and #8 remain open.
