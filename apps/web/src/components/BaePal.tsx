@@ -268,6 +268,7 @@ export default function BaePal() {
         s.emit("conversation.subscribe", path.split("/")[2], (result: any) => {
           if (current && result?.error)
             onChatUnavailable(404, chatScope(me.id, path.split("/")[2]));
+          else if (current && result?.ok) setChatRefresh((value) => value + 1);
         });
     });
     s?.on("disconnect", () => {
