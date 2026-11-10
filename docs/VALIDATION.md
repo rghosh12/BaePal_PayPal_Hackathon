@@ -8,6 +8,10 @@
 - Final suite: **19 tests passed** across two files, including real WebSocket and long-polling delivery/subscription denial, immediate block access revocation, and logout socket disconnection. Final API test run completed in approximately 11 seconds.
 - API TypeScript compile and Next.js optimized build passed; ESLint and workspace typechecks passed. The two authored Playwright tests are discoverable and their TypeScript was separately checked, but neither browser scenario was executed.
 
+## Clean-source replay
+
+A Git source export without node_modules, generated Next files, or local secrets successfully completed frozen-lockfile installation, fresh local key generation, workspace typechecks and both optimized builds. The source archive excludes `.env`, `.data`, build output, dependencies and Git metadata. No browser was launched during this check.
+
 ## Covered behavior
 
 Anonymous/origin/CSRF denial; simultaneous reciprocal likes and idempotent retries; unique match notifications; authorized persisted messages and outsider denial; budget encryption/redaction and guessed-plan denial; stale consent and purchase rejection; neutral no-overlap suggestions; two independent captures; stable create/capture retries; receipt ownership; full refund cancellation; block with retained receipts; unsigned webhook rejection; member/moderator role denial; reciprocal age/pause filtering; OTP exhaustion; onboarding draft/adult activation; pending capture without completion; timeout reconciliation without another capture; pending refund without false success; own-only export/deletion; exact calendar adult threshold; live socket authorization/delivery/revocation; Sandbox order/purchase/merchant/currency/amount binding.
