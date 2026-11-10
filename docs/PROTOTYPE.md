@@ -6,7 +6,7 @@ This is the fast iteration prototype requested by the owner. It is deployed, bac
 
 ## Try the journey
 
-1. Open the URL and sign in with the owning ChatGPT account. Choose **Explore the demo → Continue as Alex**. Use the top **Demo persona** selector to explicitly switch between Alex and Jordan.
+1. Open the URL and sign in with the owning ChatGPT account. Choose **Explore the demo → Continue as Alex**. Use the top **Demo persona** selector to explicitly switch between Alex and Jordan. Save your changes first; switching reloads the page and clears unsaved drafts.
 2. Like the other persona from Discover, switch, and reciprocate. Open Chats, send a message, switch back, and see the saved conversation. Polling refreshes active chats/plans; data survives reloads.
 3. Plan a date from the chat. Each persona independently saves a private budget, compatible activities and overlapping future times. Propose an option, and have both accept the same version.
 4. Choose the paid art or coffee option to exercise checkout; the free walk is confirmed without payment. Each explicitly opens their own ticket checkout, creates a **mock** order and simulates capture. A first ticket leaves payment pending; both paid tickets confirm the plan.

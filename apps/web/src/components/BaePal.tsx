@@ -2141,12 +2141,9 @@ export default function BaePal() {
                               email:
                                 name.toLowerCase() + "@demo.baepal.invalid",
                             });
-                            await refresh();
-                            setNotice(
-                              "Switched to fictional persona " +
-                                name +
-                                ". Every action remains explicit.",
-                            );
+                            // A fresh document resets drafts and any in-flight polling
+                            // from the previous fictional actor before rendering the next.
+                            window.location.reload();
                           });
                       }}
                     >
@@ -2162,7 +2159,7 @@ export default function BaePal() {
                 </Link>
               </div>
             </header>
-            <main className="main-content">
+            <main className="main-content" key={me?.id || "anonymous"}>
               {loading && (
                 <div className="loading-line" role="status">
                   <LoaderCircle size={18} className="spin" />
