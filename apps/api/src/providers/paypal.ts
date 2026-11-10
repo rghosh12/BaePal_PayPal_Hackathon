@@ -16,7 +16,12 @@ export interface PaymentProvider {
     event: unknown,
   ): Promise<boolean>;
 }
-const money = (amount: number) => (amount / 100).toFixed(2);
+const money = (amount: number) => {
+  if (!Number.isSafeInteger(amount) || amount < 0)
+    throw Error("Invalid USD cent amount");
+  const digits = String(amount).padStart(3, "0");
+  return `${digits.slice(0, -2)}.${digits.slice(-2)}`;
+};
 export class SandboxPayPal implements PaymentProvider {
   private base = "https://api-m.sandbox.paypal.com";
   private async request(

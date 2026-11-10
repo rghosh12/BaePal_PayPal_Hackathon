@@ -1,6 +1,6 @@
 # Exact refund amount evidence
 
-The Node API verifies completed Sandbox refund amounts with the same canonical USD string format used by capture verification. `verifiedRefund` requires the exact `money(expectedCents)` string and USD currency; it never coerces provider values to numbers. Expected completed-refund cents must be a positive safe integer. Refund evidence also needs a nonempty string provider reference.
+The Node API verifies completed Sandbox refund amounts with the same canonical USD string format used by capture verification. `verifiedRefund` requires the exact `money(expectedCents)` string and USD currency; it never coerces provider values to numbers. Expected completed-refund cents must be a positive safe integer. The shared money formatter validates nonnegative safe integers and constructs the decimal string from integer digits, preserving every cent even near the upper safe-integer boundary. Refund evidence also needs a nonempty string provider reference.
 
 The former `Number(value) * 100` check rejected valid amounts such as `0.29` and `2.51` because floating-point multiplication does not necessarily produce an exact integer. It also accepted malformed wire values that coerced to the right number, such as numeric `30`, exponent `3e1`, padded or signed strings, hexadecimal input and noncanonical precision. Those values now leave the payment captured and the compensation job retryable instead of recording a false refund completion.
 

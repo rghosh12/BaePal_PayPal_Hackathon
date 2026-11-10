@@ -54,6 +54,16 @@ describe("Sandbox capture binding", () => {
       expect(
         verifiedCapture({ id: "order-1", status: "APPROVED" }, purchase),
       ).toBeNull();
+      for (const amount_cents of [
+        -1,
+        1.5,
+        NaN,
+        Infinity,
+        Number.MAX_SAFE_INTEGER + 1,
+      ])
+        expect(() =>
+          verifiedCapture(valid(), { ...purchase, amount_cents }),
+        ).toThrow("Invalid USD cent amount");
     } finally {
       config.PAYPAL_MODE = oldMode;
       config.PAYPAL_MERCHANT_ID = oldMerchant;
@@ -109,6 +119,25 @@ describe("Sandbox refund evidence", () => {
         expect(() => verifiedRefund(completed("30.00"), cents)).toThrow(
           "Refund amount mismatch",
         );
+    } finally {
+      config.PAYPAL_MODE = original;
+    }
+  });
+  it("preserves each cent across the full safe-integer formatting range", () => {
+    const original = config.PAYPAL_MODE;
+    try {
+      config.PAYPAL_MODE = "sandbox";
+      const cents = 7036874417766401;
+      expect(verifiedRefund(completed("70368744177664.01"), cents).id).toBe(
+        "synthetic-refund",
+      );
+      expect(() =>
+        verifiedRefund(completed("70368744177664.02"), cents),
+      ).toThrow("Refund amount mismatch");
+      expect(
+        verifiedRefund(completed("90071992547409.91"), Number.MAX_SAFE_INTEGER)
+          .id,
+      ).toBe("synthetic-refund");
     } finally {
       config.PAYPAL_MODE = original;
     }
