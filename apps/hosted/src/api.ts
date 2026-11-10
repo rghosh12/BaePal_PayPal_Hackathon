@@ -10,6 +10,20 @@ import {
   catalogue,
   digest,
 } from "./store";
+import {
+  tasteFor,
+  tasteCapabilities,
+  saveConsent,
+  revokeTaste,
+  importDemo,
+  evidenceDTO,
+  correctEvidence,
+  rebuildTaste,
+  ownTasteProfile,
+  setSharing,
+  compareTaste,
+  AuthorizedPayPalHistoryProvider,
+} from "./taste";
 const id = z.string().uuid();
 const fail = (status: number, code: string, message: string): never => {
   throw Object.assign(Error(message), { status, code });
@@ -241,6 +255,7 @@ export async function handleAPI(request: Request, env: Env): Promise<Response> {
     if (path === "/config")
       return json({
         hosted: true,
+        tasteMatching: true,
         demo: true,
         paymentMode: "mock",
         emailMode: "platform",
@@ -390,21 +405,71 @@ export async function handleAPI(request: Request, env: Env): Promise<Response> {
         return { ...purchase, payment: ownPayment(s, purchase.payment_id, u) };
       }
       member(s, uid);
+      if (path === "/taste/capabilities") return tasteCapabilities();
+      if (path === "/taste/profile") return ownTasteProfile(tasteFor(s, u.id));
+      if (path === "/taste/evidence") {
+        const limit = z.coerce
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .default(100)
+          .parse(url.searchParams.get("limit") || 100);
+        const offset = z.coerce
+          .number()
+          .int()
+          .min(0)
+          .max(1000)
+          .default(0)
+          .parse(url.searchParams.get("offset") || 0);
+        return evidenceDTO(tasteFor(s, u.id), limit, offset);
+      }
+      if (/^\/taste\/imports\/[\w-]+$/.test(path)) {
+        const item = tasteFor(s, u.id).imports.find(
+          (x) => x.id === id.parse(path.split("/")[3]),
+        );
+        if (!item) return fail(404, "UNAVAILABLE", "Import unavailable.");
+        return item;
+      }
+      if (/^\/matches\/[\w-]+\/explanation$/.test(path)) {
+        const match = matchFor(s, id.parse(path.split("/")[2]), u);
+        const peer = s.users.find(
+          (p) => p.id === (match.low === u.id ? match.high : match.low),
+        )!;
+        return {
+          matchId: match.id,
+          ...compareTaste(u, peer, s.taste?.[u.id], s.taste?.[peer.id]).public,
+          notice:
+            "Only mutually approved broad tags are included. No raw purchases, amounts or peer merchant list are shared.",
+        };
+      }
       if (path === "/discover")
         return s.users
           .filter(
-            (b) =>
-              eligible(s, u, b) &&
-              !s.decisions.some((d) => d.actor === u.id && d.target === b.id),
+            (candidate) =>
+              eligible(s, u, candidate) &&
+              !s.decisions.some(
+                (d) => d.actor === u.id && d.target === candidate.id,
+              ),
           )
+          .map((candidate) => ({
+            candidate,
+            comparison: compareTaste(
+              u,
+              candidate,
+              s.taste?.[u.id],
+              s.taste?.[candidate.id],
+            ),
+          }))
           .sort(
             (a, b) =>
-              b.interests.filter((i: string) => u.interests.includes(i))
-                .length -
-                a.interests.filter((i: string) => u.interests.includes(i))
-                  .length || a.id.localeCompare(b.id),
+              b.comparison.score - a.comparison.score ||
+              a.candidate.id.localeCompare(b.candidate.id),
           )
-          .map(profile);
+          .map(({ candidate, comparison }) => ({
+            ...profile(candidate),
+            taste: comparison.public,
+          }));
       if (path === "/matches")
         return s.matches
           .filter(
@@ -530,9 +595,11 @@ export async function handleAPI(request: Request, env: Env): Promise<Response> {
               ),
             )
             .map((p) => ownPayment(s, p.id, u)),
+          taste: s.taste?.[u.id] || null,
           note: "Only this selected persona’s data; no other persona’s private budget or message text.",
         };
       if (method === "DELETE" && path === "/me") {
+        if (s.taste) delete s.taste[u.id];
         for (const p of s.plans.filter((p) =>
           s.matches.some(
             (m) => m.id === p.matchId && [m.low, m.high].includes(u.id),
@@ -562,6 +629,31 @@ export async function handleAPI(request: Request, env: Env): Promise<Response> {
         return { deleted: true };
       }
       member(s, uid);
+      if (path.startsWith("/taste/")) {
+        const taste = tasteFor(s, u.id);
+        if (method === "POST" && path === "/taste/consents")
+          return saveConsent(taste, body);
+        if (method === "POST" && path === "/taste/demo-imports")
+          return importDemo(taste, body);
+        if (method === "POST" && path === "/taste/rebuild")
+          return rebuildTaste(taste, body);
+        if (method === "PATCH" && /^\/taste\/evidence\/[\w-]+$/.test(path))
+          return correctEvidence(taste, id.parse(path.split("/")[3]), body);
+        if (method === "PATCH" && path === "/taste/profile/sharing")
+          return setSharing(taste, body);
+        if (method === "DELETE" && /^\/taste\/consents\/[\w-]+$/.test(path))
+          return revokeTaste(taste, id.parse(path.split("/")[3]));
+        if (
+          method === "POST" &&
+          (path === "/taste/paypal-sync" || path === "/taste/exports")
+        )
+          return new AuthorizedPayPalHistoryProvider().load(
+            "",
+            u.id,
+            "",
+            taste.consent.version,
+          );
+      }
       if (method === "POST" && ["/me/pause", "/me/resume"].includes(path)) {
         u.status = path.endsWith("pause") ? "paused" : "active";
         return { saved: true };

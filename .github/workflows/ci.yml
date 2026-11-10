@@ -1,5 +1,11 @@
 name: BaePal checks
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: baepal-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -41,6 +47,7 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm db:migrate && pnpm db:seed
       - run: pnpm test:e2e
+      - run: pnpm test:hosted:e2e
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

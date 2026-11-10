@@ -16,7 +16,7 @@ These issues were derived from MASTER_BUILD_PROMPT.md and checked against STATUS
 - [#6 — Integrate the official PayPal approval UI and record real Sandbox evidence](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/6)
 - [#7 — Close payment race, webhook ordering, and refund invariant coverage](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/7)
 - [#8 — Harden durable workers, reconciliation retries, and operational escalation](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/8)
-- [#9 — Implement optional professional connection adapters with accurate evidence semantics](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/9)
+- [#9 — P1: Implement optional professional connection adapters with accurate evidence semantics](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/9)
 - [#10 — Complete moderator evidence review, role scope, and audited actions](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/10)
 - [#11 — Complete private exports, retention-aware deletion, and key lifecycle](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/11)
 - [#12 — Implement durable lifecycle notifications and privacy-safe delivery](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/12)
@@ -29,10 +29,14 @@ These issues were derived from MASTER_BUILD_PROMPT.md and checked against STATUS
 
 - [#17 — Add likes inbox, targeted comments, undo pass, and advanced optional filters](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/17)
 - [#18 — Add opt-in chat receipts, typing, reminders, and calendar preferences](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/18)
-- [#19 — Add optional AI provider and safety/account refinements after core release](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/19)
+- [#19 — Complete account safety refinements after core release](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/19)
 
 ## P2 — deferred
 
 - [#20 — Keep deferred native, merchant, and advanced features outside hackathon scope](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/20)
 
 Creating these issues does not mark P0 complete or authorize live payments, production deployment, or deferred features. See GitHub issue state for current progress.
+
+## Spending-match addendum
+
+[New issues #22–#37 and the first PR scope](ADDENDUM_WORK.md) cover the purchase-interest product shift. Actual runtime AI is now core work in #25, rather than optional work in #19.

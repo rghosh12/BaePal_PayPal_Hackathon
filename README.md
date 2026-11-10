@@ -8,6 +8,10 @@ Open it with your ChatGPT account, choose Alex or Jordan, and use the **Demo per
 
 The original Node/PostgreSQL implementation remains available below. Full P0 requirements are still tracked in GitHub; the owner reprioritized a usable deployed prototype over completing every release gate first. Real Sandbox transactions remain unverified; the original API's production guard remains in place.
 
+## Purchase-interest addendum slice
+
+The [new addendum work map](docs/ADDENDUM_WORK.md) tracks purchase-interest matching. The hosted slice adds granular opt-in, fictional imports, owner-only review/corrections, versioned deterministic ranking and safe mutual explanations. Real history/export ingestion and live payments remain disabled; AI/Elastic/sponsor executions are not simulated as real integrations. [Try the taste workflow and review its evidence limits](docs/TASTE_MATCHING.md).
+
 ## Quick start
 
 Requires Node **24**, pnpm **11.25.0**, and Docker Compose. Commands run from this repository root.

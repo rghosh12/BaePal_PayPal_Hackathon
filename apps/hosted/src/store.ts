@@ -154,7 +154,7 @@ export async function mutate<T>(
     const loaded = await load(owner, env);
     const result = await fn(loaded.state);
     const json = JSON.stringify(loaded.state);
-    if (json.length > 2000000)
+    if (new TextEncoder().encode(json).byteLength > 750000)
       throw Object.assign(
         Error(
           "Prototype storage limit reached. Export your data before starting a fresh workspace.",

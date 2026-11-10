@@ -1,3 +1,4 @@
+import type { TasteState } from "./taste";
 export type Row = Record<string, any>;
 export interface Statement {
   bind(...values: unknown[]): Statement;
@@ -18,5 +19,6 @@ export type State = {
   purchases: Row[];
   payments: Row[];
   reports: Row[];
+  taste?: Record<string, TasteState>;
   rates: Record<string, { count: number; until: number }>;
 };

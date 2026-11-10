@@ -7,6 +7,8 @@ import {
   type FormEvent,
 } from "react";
 import Link from "next/link";
+import TasteWorkspace from "./TasteWorkspace";
+import MatchWhy from "./MatchWhy";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Heart,
@@ -217,6 +219,15 @@ export default function BaePal() {
     !path.startsWith("/auth/");
   const nav = [
     { href: "/discover", label: "Discover", Icon: Compass },
+    ...(config.tasteMatching
+      ? [
+          {
+            href: "/taste/connect",
+            label: "Purchase interests",
+            Icon: Sparkles,
+          },
+        ]
+      : []),
     { href: "/likes", label: "Likes", Icon: Heart },
     { href: "/chats", label: "Chats", Icon: MessageCircle },
     { href: "/dates", label: "Dates", Icon: CalendarDays },
@@ -259,6 +270,18 @@ export default function BaePal() {
           </div>
         </div>
         <div className="person-details">
+          {p.taste && (
+            <div className="taste-card-note">
+              <span className="pill">{p.taste.basis}</span>
+              <p>
+                Evidence: {p.taste.evidenceGrade}. Pattern overlap is not a
+                relationship probability.
+              </p>
+              {p.taste.commonGround.length > 0 && (
+                <p>Shared by both: {p.taste.commonGround.join(", ")}.</p>
+              )}
+            </div>
+          )}
           <div className="tag-list">
             {p.interests.map((i: string) => (
               <span className="tag" key={i}>
@@ -381,7 +404,9 @@ export default function BaePal() {
               <br />A real <em>connection.</em>
             </h1>
             <p>
-              Meet someone who gets you. Make a plan you both feel good about.
+              {config.tasteMatching
+                ? "Meet someone who spends their weekends like you. You choose which fictional purchase interests count."
+                : "Meet someone who gets you. Make a plan you both feel good about."}
               Let the first date be the easy part.
             </p>
             <div className="hero-actions">
@@ -1122,6 +1147,11 @@ export default function BaePal() {
         </Link>
       </div>
     );
+  } else if (
+    config.tasteMatching &&
+    (path.startsWith("/taste/") || path === "/settings/data")
+  ) {
+    content = <TasteWorkspace path={path} api={api} />;
   } else if (path === "/discover") {
     const cards = Array.isArray(data) ? data : [];
     content = (
@@ -1266,6 +1296,8 @@ export default function BaePal() {
         </div>
       </>
     );
+  } else if (config.tasteMatching && /^\/matches\/[\w-]+\/why$/.test(path)) {
+    content = <MatchWhy matchId={path.split("/")[2]} api={api} />;
   } else if (path === "/chats" || path === "/matches") {
     content = (
       <>
@@ -1310,6 +1342,11 @@ export default function BaePal() {
         {heading(
           "ONE CONVERSATION AT A TIME",
           m ? `You & ${m.profile.display_name}` : "Conversation",
+        )}
+        {config.tasteMatching && (
+          <Link className="text-link" href={`/matches/${mid}/why`}>
+            Why this match? <ArrowRight size={15} />
+          </Link>
         )}
         <div className="chat-layout">
           <div className="chat-panel panel">

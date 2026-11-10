@@ -45,3 +45,7 @@ All mutations except verified provider webhooks require the exact `Origin: APP_O
 ## Realtime
 
 Cookie authentication and exact origin are mandatory. `conversation.subscribe(matchId, ack)` authorizes every subscription. `message.send({conversationId,text,clientMessageId}, ack)` uses the same send service as REST. Server events are `message.created`, `match.created`, `access.revoked`. On reconnect, REST `after=sequence` provides catch-up; the current UI reloads the first 100 records, so long-history pagination remains a known limitation. Read receipts, typing, delivery acknowledgements and schema-versioned event envelopes are not implemented.
+
+## Purchase-interest extension
+
+The hosted prototype adds the owner/CSRF-checked taste and safe match-explanation routes documented in [TASTE_MATCHING.md](TASTE_MATCHING.md). The Node/PostgreSQL API does not yet expose those extensions.
