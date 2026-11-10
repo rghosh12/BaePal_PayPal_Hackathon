@@ -36,6 +36,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: git diff --exit-code -- apps/hosted/src/ui
       - run: node scripts/check-artifacts.mjs
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm db:migrate && pnpm db:seed

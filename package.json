@@ -12,12 +12,14 @@
     "dev:web": "pnpm --filter @baepal/web dev",
     "db:migrate": "pnpm --filter @baepal/api migrate",
     "db:seed": "pnpm --filter @baepal/api seed",
-    "test": "bash scripts/test.sh",
+    "test": "bash scripts/test.sh && pnpm --filter @baepal/hosted test",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
-    "build": "pnpm -r build",
+    "build": "node scripts/sync-hosted-ui.mjs && pnpm -r build",
     "test:e2e": "playwright test",
-    "format": "prettier --write apps scripts docs *.json *.yaml *.mjs .github"
+    "format": "prettier --write apps scripts docs *.json *.yaml *.mjs .github",
+    "build:prototype": "node scripts/sync-hosted-ui.mjs && pnpm --filter @baepal/hosted build",
+    "test:prototype": "pnpm --filter @baepal/hosted test"
   },
   "devDependencies": {
     "concurrently": "9.2.1",

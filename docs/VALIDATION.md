@@ -6,7 +6,7 @@
 - SQL migrations applied; 16 fictional adult profiles and original synthetic artwork seeded in the development database.
 - An isolated `baepal_test` database used for integration tests; suite explicitly refuses other database names and rebuilds fixtures per test.
 - Final suite: **19 tests passed** across two files, including real WebSocket and long-polling delivery/subscription denial, immediate block access revocation, and logout socket disconnection. Final API test run completed in approximately 11 seconds.
-- API TypeScript compile and Next.js optimized build passed; ESLint and workspace typechecks passed. The two authored Playwright tests are discoverable and their TypeScript was separately checked, but neither browser scenario was executed.
+- API TypeScript compile and Next.js optimized build passed; ESLint and workspace typechecks passed. The two authored Playwright tests are discoverable and their TypeScript was separately checked, GitHub Actions subsequently executed both scenarios: the 360px smoke check passed, while the full journey exposed a discovery timing race and an overly broad shared-IP request throttle. Fixes are being verified in the subsequent run.
 
 ## Clean-source replay
 
@@ -25,4 +25,8 @@ Provider responses in these tests are mock fixtures. Real database execution pro
 - GitHub repository creation was initially unavailable. On the subsequent publishing request the existing repository became accessible; its MIT license initialization was merged without rewriting history. CI results must be checked on the pushed commit; earlier local results do not establish a successful GitHub run.
 - Full master acceptance matrix (including partial refund races, real OAuth, media content moderation, complete export/retention, screen-reader and network failure audits) remains open in STATUS.md. All P0 completion claims are withheld.
 
-CI configuration exists but has not run on GitHub. No achieved p95 latency, conversion, accessibility score, or production reliability metric is claimed.
+CI has run on GitHub. See its latest run for the current browser result; earlier failed runs are retained. No achieved p95 latency, conversion, accessibility score, or production reliability metric is claimed.
+
+## Hosted prototype verification
+
+The private Site was successfully published with schema-only D1 migrations. Native database inspection confirmed the `DB` binding and `prototype_workspaces` table. Authenticated service health requests confirmed live database readiness and hosted/mock/platform-auth/polling configuration. Two hosted API tests passed against real SQLite/D1 statement semantics, covering the persisted two-person journey, encrypted state, budget privacy, ownership, CSRF/origin rejection, concurrent matching/message retries, independent mock purchases/refunds, blocking and per-owner namespace isolation. No browser or real PayPal evidence is implied by service health or these tests.

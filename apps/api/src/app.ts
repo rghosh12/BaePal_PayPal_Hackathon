@@ -52,7 +52,7 @@ export async function buildApp() {
   });
   await app.register(cookie);
   await app.register(helmet, { contentSecurityPolicy: false });
-  await app.register(rateLimit, { max: 120, timeWindow: "1 minute" });
+  await app.register(rateLimit, { max: 600, timeWindow: "1 minute" });
   const io = new Server(app.server, {
     cors: { origin: config.APP_ORIGIN, credentials: true },
     maxHttpBufferSize: 8192,

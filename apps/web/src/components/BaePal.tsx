@@ -57,6 +57,7 @@ export default function BaePal() {
     [busy, setBusy] = useState(false),
     [menu, setMenu] = useState(false);
   const csrf = useRef("");
+  const configCache = useRef<Row | null>(null);
   const socket = useRef<Socket | null>(null);
   const retryMessage = useRef<{ text: string; id: string } | null>(null);
   const api = useCallback(
@@ -84,7 +85,8 @@ export default function BaePal() {
     [],
   );
   const refresh = useCallback(async () => {
-    const conf = await api("/config");
+    const conf = configCache.current || (await api("/config"));
+    configCache.current = conf;
     setConfig(conf);
     let current;
     try {
@@ -139,27 +141,31 @@ export default function BaePal() {
   }, [refresh]);
   useEffect(() => {
     if (!me || !["active", "paused"].includes(me.status)) return;
-    const s = io({ transports: ["polling"], upgrade: false });
+    const s = config.hosted
+      ? null
+      : io({ transports: ["polling"], upgrade: false });
     socket.current = s;
-    s.on("connect", () => {
+    s?.on("connect", () => {
       if (path.startsWith("/chats/"))
-        s.emit("conversation.subscribe", path.split("/")[2]);
+        s?.emit("conversation.subscribe", path.split("/")[2]);
     });
-    s.on(
+    s?.on(
       "message.created",
       () =>
         void refresh().catch(() =>
           setError("Connection interrupted. Retry to refresh."),
         ),
     );
-    s.on("match.created", () => void refresh().catch(() => {}));
-    s.on("access.revoked", () => {
+    s?.on("match.created", () => void refresh().catch(() => {}));
+    s?.on("access.revoked", () => {
       setData(null);
       setNotice("Access has changed. This conversation may be unavailable.");
       void refresh().catch((e) => setError(e.message));
     });
     const timer = setInterval(() => {
       if (
+        path === "/chats" ||
+        path === "/dates" ||
         path.startsWith("/chats/") ||
         path.startsWith("/dates/") ||
         path.startsWith("/payments/")
@@ -167,11 +173,11 @@ export default function BaePal() {
         void refresh().catch(() => {});
     }, 5000);
     return () => {
-      s.disconnect();
+      s?.disconnect();
       clearInterval(timer);
       socket.current = null;
     };
-  }, [me?.id, me?.status, path, refresh]);
+  }, [me?.id, me?.status, path, refresh, config.hosted]);
   async function act(fn: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
@@ -556,200 +562,256 @@ export default function BaePal() {
                   ? "A fresh start."
                   : "Good to see you.",
           )}
-          <form
-            className="form-stack"
-            onSubmit={submit(async (f) => {
-              if (mode === "verify") {
-                await api("/auth/email/confirm", "POST", {
-                  challengeId: f.get("challenge"),
-                  code: f.get("code"),
-                });
-                await refresh();
-                go("/onboarding/profile");
-              } else if (mode === "reset") {
-                if (f.get("token")) {
-                  await api("/auth/password/reset", "POST", {
-                    challengeId: f.get("challenge"),
-                    token: f.get("token"),
-                    password: f.get("password"),
-                  });
-                  setNotice("Password reset. Log in with your new password.");
-                } else {
-                  await api("/auth/password/request", "POST", {
-                    email: f.get("email"),
-                  });
-                  setNotice(
-                    "If eligible, reset instructions are in the local email capture.",
-                  );
-                }
-              } else {
-                const result = await api(
-                  `/auth/${mode === "signup" ? "signup" : "login"}`,
-                  "POST",
-                  {
-                    email: f.get("email"),
-                    password: f.get("password"),
-                    ...(mode === "signup"
-                      ? {
-                          adult: f.get("adult") === "on",
-                          terms: f.get("terms") === "on",
-                        }
-                      : {}),
-                  },
-                );
-                const current = await refresh();
-                if (mode === "signup") {
-                  go(`/auth/verify?challenge=${result.challengeId}`);
-                } else
-                  go(
-                    current?.status === "pending_email"
-                      ? "/auth/verify"
-                      : current?.status === "onboarding"
-                        ? "/onboarding/profile"
-                        : "/discover",
-                  );
-              }
-            })}
-          >
-            {mode === "verify" ? (
-              <>
-                <p>
-                  Development email capture is stored on the API server in{" "}
-                  <code>.data/mail/</code>. Codes are never shown in public UI.
-                </p>
-                <label>
-                  Challenge ID
-                  <input
-                    name="challenge"
-                    required
-                    defaultValue={
-                      typeof window !== "undefined"
-                        ? new URLSearchParams(window.location.search).get(
-                            "challenge",
-                          ) || ""
-                        : ""
-                    }
-                  />
-                </label>
-                <label>
-                  Six-digit confirmation code
-                  <input
-                    name="code"
-                    inputMode="numeric"
-                    pattern="[0-9]{6}"
-                    maxLength={6}
-                    autoComplete="one-time-code"
-                    required
-                  />
-                </label>
-                <button disabled={busy}>Confirm my email</button>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy}
-                  onClick={() =>
-                    void act(async () => {
-                      const result = await api(
-                        "/auth/email/request",
-                        "POST",
-                        {},
-                      );
-                      setNotice(
-                        `New challenge: ${result.challengeId}. Wait 60 seconds before resending.`,
-                      );
-                    })
-                  }
+          {config.hosted && (
+            <div className="panel form-stack">
+              <p>
+                This private prototype uses ChatGPT sign-in for access. Demo
+                personas are fictional and share only your private workspace. No
+                real email/password account or PayPal purchase is created here.
+              </p>
+              {mode === "signup" ? (
+                <form
+                  className="form-stack"
+                  onSubmit={submit(async (f) => {
+                    await api("/auth/signup", "POST", {
+                      adult: f.get("adult") === "on",
+                      terms: f.get("terms") === "on",
+                    });
+                    await refresh();
+                    go("/onboarding/profile");
+                  })}
                 >
-                  Resend code
-                </button>
-              </>
-            ) : mode === "reset" ? (
-              <>
-                <label>
-                  Email
-                  <input name="email" type="email" autoComplete="email" />
-                </label>
-                <details>
-                  <summary>I have a reset token</summary>
-                  <label>
-                    Challenge ID
-                    <input name="challenge" />
+                  <label className="check">
+                    <input name="adult" type="checkbox" required />I am at least
+                    18.
                   </label>
-                  <label>
-                    Reset token
-                    <input name="token" autoComplete="off" />
+                  <label className="check">
+                    <input name="terms" type="checkbox" required />I agree to
+                    the draft terms and will use fictional information.
                   </label>
-                  <label>
-                    New password
-                    <input
-                      name="password"
-                      type="password"
-                      minLength={12}
-                      maxLength={128}
-                      autoComplete="new-password"
-                    />
-                  </label>
-                </details>
-                <button disabled={busy}>Continue</button>
-              </>
-            ) : (
-              <>
-                <label>
-                  Email address
-                  <input
-                    name="email"
-                    type="email"
-                    autoComplete="email"
-                    required
-                    placeholder="you@example.com"
-                  />
-                </label>
-                <label>
-                  Password
-                  <input
-                    name="password"
-                    type="password"
-                    minLength={mode === "signup" ? 12 : undefined}
-                    maxLength={128}
-                    autoComplete={
-                      mode === "signup" ? "new-password" : "current-password"
+                  <button disabled={busy}>Create my prototype profile</button>
+                </form>
+              ) : (
+                <Link href="/auth/login" className="text-link">
+                  Choose a demo persona below
+                </Link>
+              )}
+              <a
+                href="/signin-with-chatgpt?return_to=%2Fauth%2Flogin"
+                target="_top"
+                className="text-link"
+              >
+                Sign in with ChatGPT
+              </a>
+            </div>
+          )}
+          {!config.hosted && (
+            <>
+              <form
+                className="form-stack"
+                onSubmit={submit(async (f) => {
+                  if (mode === "verify") {
+                    await api("/auth/email/confirm", "POST", {
+                      challengeId: f.get("challenge"),
+                      code: f.get("code"),
+                    });
+                    await refresh();
+                    go("/onboarding/profile");
+                  } else if (mode === "reset") {
+                    if (f.get("token")) {
+                      await api("/auth/password/reset", "POST", {
+                        challengeId: f.get("challenge"),
+                        token: f.get("token"),
+                        password: f.get("password"),
+                      });
+                      setNotice(
+                        "Password reset. Log in with your new password.",
+                      );
+                    } else {
+                      await api("/auth/password/request", "POST", {
+                        email: f.get("email"),
+                      });
+                      setNotice(
+                        "If eligible, reset instructions are in the local email capture.",
+                      );
                     }
-                    required
-                    placeholder={
-                      mode === "signup"
-                        ? "At least 12 characters"
-                        : "Your password"
-                    }
-                  />
-                </label>
-                {mode === "signup" && (
+                  } else {
+                    const result = await api(
+                      `/auth/${mode === "signup" ? "signup" : "login"}`,
+                      "POST",
+                      {
+                        email: f.get("email"),
+                        password: f.get("password"),
+                        ...(mode === "signup"
+                          ? {
+                              adult: f.get("adult") === "on",
+                              terms: f.get("terms") === "on",
+                            }
+                          : {}),
+                      },
+                    );
+                    const current = await refresh();
+                    if (mode === "signup") {
+                      go(`/auth/verify?challenge=${result.challengeId}`);
+                    } else
+                      go(
+                        current?.status === "pending_email"
+                          ? "/auth/verify"
+                          : current?.status === "onboarding"
+                            ? "/onboarding/profile"
+                            : "/discover",
+                      );
+                  }
+                })}
+              >
+                {mode === "verify" ? (
                   <>
-                    <label className="check">
-                      <input type="checkbox" name="adult" required />I am at
-                      least 18 years old.
+                    <p>
+                      Development email capture is stored on the API server in{" "}
+                      <code>.data/mail/</code>. Codes are never shown in public
+                      UI.
+                    </p>
+                    <label>
+                      Challenge ID
+                      <input
+                        name="challenge"
+                        required
+                        defaultValue={
+                          typeof window !== "undefined"
+                            ? new URLSearchParams(window.location.search).get(
+                                "challenge",
+                              ) || ""
+                            : ""
+                        }
+                      />
                     </label>
-                    <label className="check">
-                      <input type="checkbox" name="terms" required />I agree to
-                      the <Link href="/terms">draft terms</Link> and{" "}
-                      <Link href="/privacy">privacy notice</Link>.
+                    <label>
+                      Six-digit confirmation code
+                      <input
+                        name="code"
+                        inputMode="numeric"
+                        pattern="[0-9]{6}"
+                        maxLength={6}
+                        autoComplete="one-time-code"
+                        required
+                      />
                     </label>
+                    <button disabled={busy}>Confirm my email</button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busy}
+                      onClick={() =>
+                        void act(async () => {
+                          const result = await api(
+                            "/auth/email/request",
+                            "POST",
+                            {},
+                          );
+                          setNotice(
+                            `New challenge: ${result.challengeId}. Wait 60 seconds before resending.`,
+                          );
+                        })
+                      }
+                    >
+                      Resend code
+                    </button>
+                  </>
+                ) : mode === "reset" ? (
+                  <>
+                    <label>
+                      Email
+                      <input name="email" type="email" autoComplete="email" />
+                    </label>
+                    <details>
+                      <summary>I have a reset token</summary>
+                      <label>
+                        Challenge ID
+                        <input name="challenge" />
+                      </label>
+                      <label>
+                        Reset token
+                        <input name="token" autoComplete="off" />
+                      </label>
+                      <label>
+                        New password
+                        <input
+                          name="password"
+                          type="password"
+                          minLength={12}
+                          maxLength={128}
+                          autoComplete="new-password"
+                        />
+                      </label>
+                    </details>
+                    <button disabled={busy}>Continue</button>
+                  </>
+                ) : (
+                  <>
+                    <label>
+                      Email address
+                      <input
+                        name="email"
+                        type="email"
+                        autoComplete="email"
+                        required
+                        placeholder="you@example.com"
+                      />
+                    </label>
+                    <label>
+                      Password
+                      <input
+                        name="password"
+                        type="password"
+                        minLength={mode === "signup" ? 12 : undefined}
+                        maxLength={128}
+                        autoComplete={
+                          mode === "signup"
+                            ? "new-password"
+                            : "current-password"
+                        }
+                        required
+                        placeholder={
+                          mode === "signup"
+                            ? "At least 12 characters"
+                            : "Your password"
+                        }
+                      />
+                    </label>
+                    {mode === "signup" && (
+                      <>
+                        <label className="check">
+                          <input type="checkbox" name="adult" required />I am at
+                          least 18 years old.
+                        </label>
+                        <label className="check">
+                          <input type="checkbox" name="terms" required />I agree
+                          to the <Link href="/terms">draft terms</Link> and{" "}
+                          <Link href="/privacy">privacy notice</Link>.
+                        </label>
+                      </>
+                    )}
+                    <button disabled={busy}>
+                      {mode === "signup" ? "Create my account" : "Log in"}
+                      <ArrowRight size={17} />
+                    </button>
                   </>
                 )}
-                <button disabled={busy}>
-                  {mode === "signup" ? "Create my account" : "Log in"}
-                  <ArrowRight size={17} />
-                </button>
-              </>
-            )}
-          </form>
+              </form>
+            </>
+          )}
           {mode === "login" && (
             <>
-              <Link href="/auth/reset" className="text-link">
-                Forgot password?
-              </Link>
+              {!config.hosted && (
+                <Link href="/auth/reset" className="text-link">
+                  Forgot password?
+                </Link>
+              )}
               {config.demo && (
                 <div className="demo-login">
-                  <span className="eyebrow">LOCAL DEMO · FICTIONAL ADULTS</span>
+                  <span className="eyebrow">
+                    PRIVATE DEMO · FICTIONAL ADULTS
+                  </span>
                   <p>Try Alex or Jordan in separate browser contexts.</p>
                   {["Alex", "Jordan"].map((n) => (
                     <button
@@ -975,11 +1037,14 @@ export default function BaePal() {
             />
           </label>
           <label>
-            Upload a photo · technical validation only
+            Upload a photo ·{" "}
+            {config.hosted
+              ? "unavailable in hosted demo; use illustrations below"
+              : "technical validation only"}
             <input
               type="file"
               accept="image/jpeg,image/png,image/webp"
-              disabled={busy}
+              disabled={busy || config.hosted}
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file)
@@ -1865,12 +1930,15 @@ export default function BaePal() {
           >
             <h2>Your data belongs with you.</h2>
             <label>
-              Confirm password
+              {config.hosted
+                ? "ChatGPT access protects this workspace; no demo password is needed"
+                : "Confirm password"}
               <input
                 name="password"
                 type="password"
                 autoComplete="current-password"
-                required
+                disabled={config.hosted}
+                required={!config.hosted}
               />
             </label>
             <button className="secondary" disabled={busy}>
@@ -1965,7 +2033,10 @@ export default function BaePal() {
   return (
     <>
       <div className="demo-banner">
-        <span>✦</span> A work in progress, made for connection.{" "}
+        <span>✦</span>{" "}
+        {config.hosted
+          ? "Private prototype workspace. Fictional personas, persistent demo data."
+          : "A work in progress, made for connection."}{" "}
         <strong>
           Fictional hackathon demo ·{" "}
           {config.paymentMode === "sandbox"
@@ -2049,6 +2120,43 @@ export default function BaePal() {
               <div>
                 <span className="tiny-star">✦</span>
                 <span>A little more intentional.</span>
+                {config.hosted && (
+                  <label className="persona-picker">
+                    <span className="sr-only">Demo persona</span>
+                    <select
+                      aria-label="Demo persona"
+                      value={
+                        ["Alex", "Jordan", "Sam", "Parker"].includes(
+                          me?.profile.display_name,
+                        )
+                          ? me?.profile.display_name
+                          : ""
+                      }
+                      disabled={busy}
+                      onChange={(e) => {
+                        const name = e.target.value;
+                        if (name)
+                          void act(async () => {
+                            await api("/auth/login", "POST", {
+                              email:
+                                name.toLowerCase() + "@demo.baepal.invalid",
+                            });
+                            await refresh();
+                            setNotice(
+                              "Switched to fictional persona " +
+                                name +
+                                ". Every action remains explicit.",
+                            );
+                          });
+                      }}
+                    >
+                      <option value="">Switch demo</option>
+                      {["Alex", "Jordan", "Sam", "Parker"].map((n) => (
+                        <option key={n}>{n}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <Link href="/profile" aria-label="Your profile">
                   <UserRound size={19} />
                 </Link>

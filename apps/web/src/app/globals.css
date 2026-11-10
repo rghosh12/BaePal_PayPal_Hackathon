@@ -1867,3 +1867,30 @@ code {
     scroll-behavior: auto !important;
   }
 }
+
+.persona-picker select {
+  max-width: 112px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  color: var(--ink);
+  padding: 6px;
+  font-size: 11px;
+}
+.topbar {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 76px;
+  gap: 5px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+@media (max-width: 620px) {
+  .topbar > div > span:nth-child(2) {
+    display: none;
+  }
+  .persona-picker select {
+    max-width: 100px;
+  }
+}

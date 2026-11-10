@@ -1,6 +1,6 @@
 # Feature status and production gaps
 
-P0 is **not complete**. This is a runnable local vertical slice, not a release-ready dating or payments service.
+P0 is **not complete**. A private persistent prototype is deployed at https://baepal-prototype.ruppakriki.chatgpt.site. The owner reprioritized a usable framework over the full release gate; see [PROTOTYPE.md](PROTOTYPE.md) for the hosted scope. The table below describes remaining full-product work and the original Node/PostgreSQL implementation, not a claim that every listed adapter runs in the hosted demo.
 
 | Area                     | Implemented                                                                                                                                                                                     | Outstanding                                                                                                                                                                                                                                |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

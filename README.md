@@ -2,7 +2,11 @@
 
 A good connection deserves a good first date. BaePal is a Seattle-focused, mobile-first dating prototype with mutual matches, persisted chat, private budget coordination, versioned date consent, and independent demo ticket purchases.
 
-**Status: working local development prototype; P0 is not release-complete.** Mock payment tests pass against real PostgreSQL. Real PayPal Sandbox transactions and browser verification remain unverified. No live payments or real venue bookings are supported. Production startup is deliberately disabled.
+**Deployed private prototype:** https://baepal-prototype.ruppakriki.chatgpt.site
+
+Open it with your ChatGPT account, choose Alex or Jordan, and use the **Demo persona** selector to test both sides. The core flow persists through reloads. Hosted tickets/refunds are explicitly mock; no real booking, PayPal call, or public member network is implied. [Try it and improve the framework](docs/PROTOTYPE.md).
+
+The original Node/PostgreSQL implementation remains available below. Full P0 requirements are still tracked in GitHub; the owner reprioritized a usable deployed prototype over completing every release gate first. Real Sandbox transactions remain unverified; the original API's production guard remains in place.
 
 ## Quick start
 
