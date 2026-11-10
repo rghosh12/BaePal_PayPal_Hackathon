@@ -1,4 +1,9 @@
 import {
+  catalogueSnapshot,
+  paymentSummariesResponse,
+  purchaseResponse,
+} from "./response-contracts.js";
+import {
   createIntegrationHub,
   rankCatalogue,
   integrationStatus,
@@ -954,7 +959,7 @@ export async function buildApp() {
       const version = p.version + 1;
       await c.query(
         "INSERT INTO proposals(plan_id,version,catalogue_id,starts_at,snapshot) VALUES($1,$2,$3,$4,$5)",
-        [p.id, version, x.id, b.startsAt, JSON.stringify(x)],
+        [p.id, version, x.id, b.startsAt, JSON.stringify(catalogueSnapshot(x))],
       );
       await c.query(
         "UPDATE date_plans SET version=$2,status='proposed' WHERE id=$1",
@@ -1077,11 +1082,16 @@ export async function buildApp() {
     const s = await session(r);
     const p = await one(
       db,
-      "SELECT u.*,p.id AS payment_id FROM purchases u JOIN payments p ON p.purchase_id=u.id WHERE u.id=$1 AND u.buyer_id=$2",
+      "SELECT u.id,u.plan_id,u.version,u.amount_cents,u.currency,u.snapshot,u.state,p.id AS payment_id FROM purchases u JOIN payments p ON p.purchase_id=u.id WHERE u.id=$1 AND u.buyer_id=$2",
       [param(r), s.user_id],
     );
     if (!p) return fail(404, "UNAVAILABLE", "Purchase unavailable.");
-    return ok({ ...p, payment: await ownPayment(s.user_id, p.payment_id) });
+    return ok(
+      purchaseResponse({
+        ...p,
+        payment: await ownPayment(s.user_id, p.payment_id),
+      }),
+    );
   });
   app.post("/api/v1/payments/orders", async (r) => {
     const s = await member(r);
@@ -1095,12 +1105,14 @@ export async function buildApp() {
   app.get("/api/v1/payments", async (r) => {
     const s = await session(r);
     return ok(
-      (
-        await db.query(
-          "SELECT p.id,p.state,p.mode,u.amount_cents,u.currency,u.snapshot FROM payments p JOIN purchases u ON u.id=p.purchase_id WHERE u.buyer_id=$1 ORDER BY p.created_at DESC",
-          [s.user_id],
-        )
-      ).rows,
+      paymentSummariesResponse(
+        (
+          await db.query(
+            "SELECT p.id,p.state,p.mode,u.amount_cents,u.currency,u.snapshot FROM payments p JOIN purchases u ON u.id=p.purchase_id WHERE u.buyer_id=$1 ORDER BY p.created_at DESC",
+            [s.user_id],
+          )
+        ).rows,
+      ),
     );
   });
   app.get("/api/v1/payments/:id", async (r) => {

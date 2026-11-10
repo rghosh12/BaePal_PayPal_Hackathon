@@ -1,0 +1,1673 @@
+{
+  "info": {
+    "name": "BaePal synthetic core/payment regression",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Actual Newman execution against an isolated loopback original API and randomly scoped PostgreSQL schema. Fictional data and mock provider only; no Sandbox claim. Run pnpm test:postman:core."
+  },
+  "item": [
+    {
+      "name": "Anonymous receipt denied",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": ""
+          },
+          {
+            "key": "x-csrf-token",
+            "value": ""
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/{{foreign_payment_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Login fictional actor",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"email\":\"{{actor_email}}\",\"password\":\"{{password}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.environment.set(\"csrf\", pm.response.json().data.csrf);",
+              "pm.environment.set(\"session_cookie\", pm.response.headers.get(\"set-cookie\").split(\";\")[0]);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Login fictional actor identity binding",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/me"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Expected fictional actor\", () => pm.expect(pm.response.json().data.id).to.equal(pm.environment.get(\"actor_id\")));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Private budget is owner-only",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/date-plans/{{plan_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Own budget available\", () => pm.expect(pm.response.json().data.ownPreferences.budgetCents).to.equal(5297));",
+              "pm.test(\"Partner budget redacted\", () => pm.expect(pm.response.text()).not.to.include(\"4891\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Guessed conversation denied",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/conversations/{{foreign_match_id}}/messages"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Foreign payment receipt denied",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/{{foreign_payment_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Foreign purchase denied",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/purchases/{{foreign_purchase_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Missing CSRF mutation denied",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "invalid"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/purchases",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"planId\":\"{{plan_id}}\",\"proposalVersion\":1}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Foreign origin mutation denied",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "https://example.invalid"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/purchases",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"planId\":\"{{plan_id}}\",\"proposalVersion\":1}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create immutable catalogue purchase despite client amount tampering",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/purchases",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"planId\":\"{{plan_id}}\",\"proposalVersion\":1,\"amountCents\":1,\"currency\":\"EUR\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.environment.set(\"purchase_id\", pm.response.json().data.purchaseId);",
+              "pm.environment.set(\"payment_id\", pm.response.json().data.paymentId);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Purchase replay preserves identity",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/purchases",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"planId\":\"{{plan_id}}\",\"proposalVersion\":1,\"amountCents\":1,\"currency\":\"EUR\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Same purchase\", () => pm.expect(pm.response.json().data.purchaseId).to.equal(pm.environment.get(\"purchase_id\")));",
+              "pm.test(\"Same payment\", () => pm.expect(pm.response.json().data.paymentId).to.equal(pm.environment.get(\"payment_id\")));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Server price and currency remain authoritative",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/purchases/{{purchase_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Catalogue amount\", () => pm.expect(pm.response.json().data.amount_cents).to.equal(3000));",
+              "pm.test(\"Catalogue currency\", () => pm.expect(pm.response.json().data.currency).to.equal(\"USD\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create mock order",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/orders",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"paymentId\":\"{{payment_id}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.environment.set(\"order_id\", pm.response.json().data.orderId);",
+              "pm.test(\"Explicit mock mode\", () => pm.expect(pm.response.json().data.mode).to.equal(\"mock\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Order replay preserves provider operation",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/orders",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"paymentId\":\"{{payment_id}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Same order\", () => pm.expect(pm.response.json().data.orderId).to.equal(pm.environment.get(\"order_id\")));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Capture actor mock payment",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/{{payment_id}}/capture",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.environment.set(\"capture_id\", pm.response.json().data.capture_id);",
+              "pm.test(\"Capture complete\", () => pm.expect(pm.response.json().data.state).to.equal(\"completed\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Capture replay does not create another capture",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/{{payment_id}}/capture",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Same capture\", () => pm.expect(pm.response.json().data.capture_id).to.equal(pm.environment.get(\"capture_id\")));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "First payer cannot confirm the plan",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/date-plans/{{plan_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Still payment pending\", () => pm.expect(pm.response.json().data.status).to.equal(\"payment_pending\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Login fictional peer",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"email\":\"{{peer_email}}\",\"password\":\"{{password}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.environment.set(\"csrf\", pm.response.json().data.csrf);",
+              "pm.environment.set(\"session_cookie\", pm.response.headers.get(\"set-cookie\").split(\";\")[0]);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Login fictional peer identity binding",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/me"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Expected fictional actor\", () => pm.expect(pm.response.json().data.id).to.equal(pm.environment.get(\"peer_id\")));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Peer cannot capture actor payment",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/{{payment_id}}/capture",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Peer order",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/orders",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"paymentId\":\"{{foreign_payment_id}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Peer capture",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/{{foreign_payment_id}}/capture",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Peer captured independently\", () => pm.expect(pm.response.json().data.state).to.equal(\"completed\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Both payers confirm the same plan",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/date-plans/{{plan_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Confirmed after both payments\", () => pm.expect(pm.response.json().data.status).to.equal(\"confirmed\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Return to fictional actor",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"email\":\"{{actor_email}}\",\"password\":\"{{password}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.environment.set(\"csrf\", pm.response.json().data.csrf);",
+              "pm.environment.set(\"session_cookie\", pm.response.headers.get(\"set-cookie\").split(\";\")[0]);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Return to fictional actor identity binding",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/me"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Expected fictional actor\", () => pm.expect(pm.response.json().data.id).to.equal(pm.environment.get(\"actor_id\")));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Unsigned webhook rejected",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/webhooks/paypal",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"id\":\"synthetic-unsigned-event\",\"event_type\":\"PAYMENT.CAPTURE.COMPLETED\",\"resource\":{}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));",
+              "pm.test(\"Signature error\", () => pm.expect(pm.response.json().error.code).to.equal(\"INVALID_SIGNATURE\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cancel paid plan",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/date-plans/{{plan_id}}/cancel",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"expectedVersion\":1}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Wait for verified refund",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/{{payment_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const receipt=pm.response.json().data;",
+              "const attempts=Number(pm.environment.get(\"refund_poll_count\") || 0)+1;",
+              "pm.environment.set(\"refund_poll_count\", attempts);",
+              "if (receipt.state !== \"refunded\" && attempts < 30) { setTimeout(() => pm.execution.setNextRequest(\"Wait for verified refund\"), 100); } else {",
+              "pm.test(\"Refund receipt verified complete\", () => pm.expect(receipt.state).to.equal(\"refunded\"));",
+              "pm.test(\"Full refund amount\", () => pm.expect(receipt.refunds[0].amount_cents).to.equal(3000));",
+              "pm.test(\"Refund completed\", () => pm.expect(receipt.refunds[0].state).to.equal(\"completed\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Wait for both refunds to settle the plan",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/date-plans/{{plan_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const plan=pm.response.json().data;",
+              "const attempts=Number(pm.environment.get(\"plan_refund_poll_count\") || 0)+1;",
+              "pm.environment.set(\"plan_refund_poll_count\", attempts);",
+              "if (plan.financialState !== \"refunded\" && attempts < 30) { setTimeout(() => pm.execution.setNextRequest(\"Wait for both refunds to settle the plan\"), 100); } else {",
+              "pm.test(\"Both refunds reconciled\", () => pm.expect(plan.financialState).to.equal(\"refunded\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cancel replay preserves refunded terminal state",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/date-plans/{{plan_id}}/cancel",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"expectedVersion\":1}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Refunded plan remains refunded",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/date-plans/{{plan_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Cancelled plan\", () => pm.expect(pm.response.json().data.status).to.equal(\"cancelled\"));",
+              "pm.test(\"Refunded financial state\", () => pm.expect(pm.response.json().data.financialState).to.equal(\"refunded\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Block revokes chat access",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/blocks",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"targetId\":\"{{peer_id}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Blocked conversation unavailable",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/conversations/{{match_id}}/messages"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Owner retains receipt after blocking",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/{{payment_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Refunded receipt retained\", () => pm.expect(pm.response.json().data.state).to.equal(\"refunded\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Peer retains own refund after blocking",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"email\":\"{{peer_email}}\",\"password\":\"{{password}}\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.environment.set(\"csrf\", pm.response.json().data.csrf);",
+              "pm.environment.set(\"session_cookie\", pm.response.headers.get(\"set-cookie\").split(\";\")[0]);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Peer retains own refund after blocking identity binding",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/me"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Expected fictional actor\", () => pm.expect(pm.response.json().data.id).to.equal(pm.environment.get(\"peer_id\")));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Peer refund is verified independently",
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "{{app_origin}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "{{session_cookie}}"
+          },
+          {
+            "key": "x-csrf-token",
+            "value": "{{csrf}}"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/payments/{{foreign_payment_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Peer receipt refunded\", () => pm.expect(pm.response.json().data.state).to.equal(\"refunded\"));",
+              "pm.test(\"Peer refund complete\", () => pm.expect(pm.response.json().data.refunds[0].state).to.equal(\"completed\"));",
+              "pm.test(\"Peer refund amount\", () => pm.expect(pm.response.json().data.refunds[0].amount_cents).to.equal(3000));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

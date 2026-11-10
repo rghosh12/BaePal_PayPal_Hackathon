@@ -1,0 +1,11 @@
+# Proposal and financial response privacy
+
+The original Node API uses explicit Zod output contracts for catalogue snapshots, payment summaries, owner receipts, nested refunds and purchase responses. Database authorization still selects only the caller's purchase; output projection is a separate boundary after authorization.
+
+Proposals previously persisted the full eligible option, including `earliestStart` and `latestEnd`, which are derived from private planning preferences. Those fields then survived in proposal and receipt snapshots. New proposals now persist only purchased catalogue fields. Response projection also strips the fields from older stored proposals and purchases, without rewriting financial history. Unknown nested snapshot/refund/provider fields and internal buyer IDs cannot pass through a raw database-row spread. Owner-facing order, capture and refund references remain visible because the receipt UI uses them.
+
+The public catalogue snapshot consists of `id`, `title`, `activity`, `description`, `address` (the fictional venue), `price_cents`, `duration_minutes`, `accessibility` and `policy`. This venue address is not a member's location. Payment list/detail and purchase/detail share those snapshot validators. Invalid stored output fails closed with the generic server error instead of treating it as malformed user input or exposing output-validation details.
+
+The interactive suggestion endpoint still returns eligible window bounds so the caller can choose an allowed start time. This change removes those bounds from long-lived purchased/proposed snapshots; it does not claim that eligible options reveal nothing about either member's preferences. Private budgets and dating messages remain outside these response contracts.
+
+Verification includes a PostgreSQL route regression observed failing before the fix (the proposal snapshot contained `earliestStart`), adversarial legacy JSON in stored snapshots, receipt/purchase ownership checks, capture/refund reference preservation and invalid-state redaction. Pure serializer tests exercise nested unknown fields and invalid lifecycle/currency/amount values. Issue #46 tracks this bounded slice; #16 remains open for other routes and complete OpenAPI/output contracts. Hosted Worker DTOs are separate and unchanged.

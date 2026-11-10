@@ -23,7 +23,8 @@
     "test:hosted:e2e": "playwright test --config playwright.hosted.config.ts",
     "test:postman": "node scripts/generate-postman.mjs --check && node scripts/run-postman.mjs",
     "postman:generate": "node scripts/generate-postman.mjs",
-    "integrations:check": "node scripts/check-integrations.mjs"
+    "integrations:check": "node scripts/check-integrations.mjs",
+    "test:postman:core": "node scripts/generate-postman-core.mjs --check && pnpm --filter @baepal/api exec tsx ../../scripts/run-postman-core.mjs"
   },
   "devDependencies": {
     "concurrently": "9.2.1",

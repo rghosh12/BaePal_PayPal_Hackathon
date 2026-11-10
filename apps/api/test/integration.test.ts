@@ -281,6 +281,83 @@ describe("real PostgreSQL access and consent invariants", () => {
     );
     expect(stored.budget_encrypted).not.toContain("5000");
   });
+  it("redacts private planning windows and unknown snapshot fields from proposals and financial responses", async () => {
+    const p = await accepted();
+    const purchase = await data(a, "POST", "/purchases", {
+      planId: p.id,
+      proposalVersion: 1,
+    });
+    const view = await data(a, "GET", `/date-plans/${p.id}`);
+    expect(view.proposal.snapshot).not.toHaveProperty("earliestStart");
+    expect(view.proposal.snapshot).not.toHaveProperty("latestEnd");
+    const stored = await one(
+      db,
+      "SELECT snapshot FROM proposals WHERE plan_id=$1",
+      [p.id],
+    );
+    expect(stored.snapshot).not.toHaveProperty("earliestStart");
+    expect(stored.snapshot).not.toHaveProperty("latestEnd");
+    // Existing rows can predate response contracts. Never pass unknown JSON through.
+    const extra = {
+      earliestStart: p.start,
+      latestEnd: p.end,
+      provider_payload: { secret: "private-financial-fixture" },
+    };
+    await db.query(
+      "UPDATE proposals SET snapshot=snapshot || $2::jsonb WHERE plan_id=$1",
+      [p.id, JSON.stringify(extra)],
+    );
+    await db.query(
+      "UPDATE purchases SET snapshot=snapshot || $2::jsonb WHERE id=$1",
+      [purchase.purchaseId, JSON.stringify(extra)],
+    );
+    const responses = [
+      await data(a, "GET", `/date-plans/${p.id}`),
+      await data(a, "GET", `/purchases/${purchase.purchaseId}`),
+      await data(a, "GET", `/payments/${purchase.paymentId}`),
+      await data(a, "GET", "/payments"),
+    ];
+    for (const value of responses) {
+      const text = JSON.stringify(value);
+      expect(text).not.toContain("earliestStart");
+      expect(text).not.toContain("latestEnd");
+      expect(text).not.toContain("private-financial-fixture");
+    }
+    const receipt = await data(a, "GET", `/payments/${purchase.paymentId}`);
+    expect(receipt.snapshot.title).toBe("Art night");
+    expect(receipt.amount_cents).toBe(3000);
+    expect(receipt).not.toHaveProperty("buyer_id");
+    expect(
+      (await req(b, "GET", `/payments/${purchase.paymentId}`)).statusCode,
+    ).toBe(404);
+    expect(
+      (await req(b, "GET", `/purchases/${purchase.purchaseId}`)).statusCode,
+    ).toBe(404);
+    await data(a, "POST", "/payments/orders", {
+      paymentId: purchase.paymentId,
+    });
+    const captured = await data(
+      a,
+      "POST",
+      `/payments/${purchase.paymentId}/capture`,
+      {},
+    );
+    expect(captured.order_id).toBeTruthy();
+    expect(captured.capture_id).toBeTruthy();
+    expect(JSON.stringify(captured)).not.toContain("private-financial-fixture");
+    await data(a, "POST", `/date-plans/${p.id}/cancel`, { expectedVersion: 1 });
+    await workerTick();
+    const refunded = await data(a, "GET", `/payments/${purchase.paymentId}`);
+    expect(refunded.refunds[0].provider_id).toBeTruthy();
+    expect(refunded.refunds[0].state).toBe("completed");
+    await db.query(
+      "UPDATE payments SET state='private-invalid-fixture' WHERE id=$1",
+      [purchase.paymentId],
+    );
+    const malformed = await req(a, "GET", `/payments/${purchase.paymentId}`);
+    expect(malformed.statusCode).toBe(500);
+    expect(malformed.body).not.toContain("private-invalid-fixture");
+  });
   it("invalidates both acceptances on revision and rejects stale consent", async () => {
     const p = await accepted();
     await data(a, "POST", `/date-plans/${p.id}/proposals`, {

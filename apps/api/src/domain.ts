@@ -1,3 +1,4 @@
+import { catalogueSnapshot } from "./response-contracts.js";
 import { randomUUID } from "node:crypto";
 import { db, one, tx, type Conn } from "./db.js";
 import { ageOn, decrypt, encrypt } from "./crypto.js";
@@ -63,7 +64,12 @@ export async function publicProfile(c: Conn | typeof db, id: string) {
     [id],
   );
 }
-export async function eligible(c: Conn | typeof db, a: string, b: string) {
+export async function eligible(
+  c: Conn | typeof db,
+  a: string,
+  b: string,
+  allowActiveMatch = false,
+) {
   if (a === b) return false;
   const rows = await c.query(
     `SELECT u.id,u.status,p.city,q.gender,q.genders,q.age_min,q.age_max,q.birth_date FROM users u JOIN profiles p ON p.user_id=u.id JOIN profile_private q ON q.user_id=u.id WHERE u.id=ANY($1::uuid[])`,
@@ -88,8 +94,8 @@ export async function eligible(c: Conn | typeof db, a: string, b: string) {
   }
   return !(
     await c.query(
-      "SELECT 1 FROM blocks WHERE (actor_id=$1 AND target_id=$2) OR (actor_id=$2 AND target_id=$1) UNION ALL SELECT 1 FROM matches WHERE low_id=LEAST($1::uuid,$2::uuid) AND high_id=GREATEST($1::uuid,$2::uuid)",
-      [a, b],
+      "SELECT 1 FROM blocks WHERE (actor_id=$1 AND target_id=$2) OR (actor_id=$2 AND target_id=$1) UNION ALL SELECT 1 FROM matches WHERE low_id=LEAST($1::uuid,$2::uuid) AND high_id=GREATEST($1::uuid,$2::uuid) AND (status<>'active' OR NOT $3::boolean)",
+      [a, b, allowActiveMatch],
     )
   ).rowCount;
 }
@@ -115,10 +121,14 @@ export async function decide(
         existing.mutation_id !== mutation
       )
         return fail(409, "IDEMPOTENCY_CONFLICT", "Decision already recorded.");
+      // Exact idempotency replay may refer to the newly formed active match,
+      // but must not resurrect a closed/blocked/paused or now-ineligible card.
+      if (!(await eligible(c, user, target, true)))
+        return fail(404, "UNAVAILABLE", "This profile is unavailable.");
       return {
         match: await one(
           c,
-          "SELECT id FROM matches WHERE low_id=LEAST($1::uuid,$2::uuid) AND high_id=GREATEST($1::uuid,$2::uuid)",
+          "SELECT id FROM matches WHERE low_id=LEAST($1::uuid,$2::uuid) AND high_id=GREATEST($1::uuid,$2::uuid) AND status='active'",
           [user, target],
         ),
       };
@@ -245,7 +255,9 @@ export async function planDTO(c: Conn | typeof db, p: any, user: string) {
           timeEnd: own.time_end,
         }
       : null,
-    proposal,
+    proposal: proposal
+      ? { ...proposal, snapshot: catalogueSnapshot(proposal.snapshot) }
+      : null,
     acceptedByYou: accepted.includes(user),
     acceptanceCount: accepted.length,
     yourTicket: paid.find((r) => r.buyer_id === user)?.state || "not purchased",
