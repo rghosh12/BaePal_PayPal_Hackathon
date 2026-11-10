@@ -112,11 +112,25 @@ test("private review at 360px scrolls the table without page overflow", async ({
   await expect(page).toHaveURL(/\/taste\/imports\//);
   await page.goto("/taste/review");
   await expect(page.getByRole("table")).toBeVisible();
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
+  const layout = await page.evaluate(() => ({
+    width: innerWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    oversized: [...document.querySelectorAll("body *")]
+      .filter(
+        (el) =>
+          !el.closest(".taste-table-wrap") &&
+          el.getBoundingClientRect().width > innerWidth,
+      )
+      .slice(0, 12)
+      .map((el) => ({
+        tag: el.tagName,
+        className: el.className,
+        width: el.getBoundingClientRect().width,
+      })),
+  }));
+  expect(layout.scrollWidth, JSON.stringify(layout)).toBeLessThanOrEqual(
+    layout.width,
+  );
   await expect(
     page.getByRole("region", { name: "Scrollable private evidence review" }),
   ).toHaveAttribute("tabindex", "0");

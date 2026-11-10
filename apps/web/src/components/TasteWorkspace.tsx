@@ -60,6 +60,7 @@ export default function TasteWorkspace({ path, api }: Props) {
     let alive = true;
     setLoading(true);
     setError("");
+    setNotice("");
     load()
       .catch((e) => {
         if (alive) setError(e.message);
@@ -154,7 +155,7 @@ export default function TasteWorkspace({ path, api }: Props) {
           {notice}
         </div>
       )}
-      {profile && capabilities && evidence && (
+      {!loading && profile && capabilities && evidence && (
         <>
           {path === "/taste/connect" && (
             <div className="planning-layout">
@@ -501,7 +502,7 @@ export default function TasteWorkspace({ path, api }: Props) {
                                       )
                                     }
                                   />
-                                  Included by you
+                                  Not manually excluded
                                 </label>
                                 <button
                                   className="secondary"

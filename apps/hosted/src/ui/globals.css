@@ -2048,3 +2048,34 @@ code {
     width: calc(100% + 10px);
   }
 }
+
+.taste-workspace,
+.taste-workspace > .panel,
+.taste-workspace .form-stack {
+  min-width: 0;
+  max-width: 100%;
+}
+.taste-workspace > .panel {
+  width: 100%;
+}
+.taste-workspace .heading-row > div {
+  min-width: 0;
+}
+.taste-table-wrap {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+@media (max-width: 620px) {
+  .taste-workspace .heading-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .taste-table-wrap {
+    width: 100%;
+    margin: 0;
+  }
+  .taste-table .check {
+    white-space: normal;
+  }
+}
