@@ -38,6 +38,33 @@ test("long chat catches up, retries a persisted send after lost ack, then clears
     );
     await expect(rows).toHaveCount(fixture.count);
     expect(await rows.allTextContents()).toEqual(expected);
+    const composer = page.getByRole("textbox", { name: "Your message" });
+    const send = page.getByRole("button", { name: "Send message" });
+    const navigationDraft =
+      "CI fictional draft kept while offline and navigating between chats.";
+    await alex.setOffline(true);
+    await expect(
+      page.getByRole("status").filter({ hasText: /^Offline\./ }),
+    ).toBeVisible();
+    await composer.fill(navigationDraft);
+    await expect(composer).toHaveValue(navigationDraft);
+    await expect(send).toBeDisabled();
+    await alex.setOffline(false);
+    await expect(composer).toHaveValue(navigationDraft);
+    await expect(send).toBeEnabled();
+    // Use client navigation. A document reload intentionally clears tab-memory
+    // drafts; this checks the supported in-memory navigation guarantee instead.
+    await page
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("link", { name: /^Chats/ })
+      .click();
+    await expect(page).toHaveURL(/\/chats$/);
+    await page.locator(`a[href="/chats/${fixture.matchId}"]`).click();
+    await expect(page).toHaveURL(new RegExp(`/chats/${fixture.matchId}$`));
+    await expect(composer).toHaveValue(navigationDraft);
+    await expect(rows).toHaveCount(fixture.count);
+    expect(await rows.allTextContents()).toEqual(expected);
+    await composer.fill("");
 
     const peerPage = await jordan.newPage();
     await peerPage.goto("/auth/login");
@@ -87,8 +114,6 @@ test("long chat catches up, retries a persisted send after lost ack, then clears
     });
     const lostText =
       "CI fictional message with a deliberately lost acknowledgement.";
-    const composer = page.getByRole("textbox", { name: "Your message" });
-    const send = page.getByRole("button", { name: "Send message" });
     await composer.fill(lostText);
     await send.click();
     await lostAck;
