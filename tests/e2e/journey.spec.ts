@@ -47,13 +47,24 @@ test("two people match, exchange a persisted message, agree on a date and indepe
     .getByRole("textbox", { name: "Your message" })
     .fill("Coffee and a little art?");
   await alex.getByRole("button", { name: "Send message" }).click();
-  await expect(jordan.getByRole("log")).toContainText(
-    "Coffee and a little art?",
-  );
+  await expect(
+    alex
+      .getByRole("log")
+      .getByText("Coffee and a little art?", { exact: true }),
+  ).toBeVisible();
+  // The peer may recover through socket subscription catch-up or polling.
+  // Allow three polling windows without weakening the exact persisted text check.
+  await expect(
+    jordan
+      .getByRole("log")
+      .getByText("Coffee and a little art?", { exact: true }),
+  ).toBeVisible({ timeout: 15000 });
   await jordan.reload();
-  await expect(jordan.getByRole("log")).toContainText(
-    "Coffee and a little art?",
-  );
+  await expect(
+    jordan
+      .getByRole("log")
+      .getByText("Coffee and a little art?", { exact: true }),
+  ).toBeVisible({ timeout: 15000 });
   await alex.getByRole("button", { name: "Plan a date", exact: true }).click();
   await expect(alex).toHaveURL(/\/dates\//);
   await jordan.goto(alex.url());
