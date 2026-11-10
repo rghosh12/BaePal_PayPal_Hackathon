@@ -15,9 +15,13 @@ async function likeUntil(page: Page, name: string) {
     });
     if (await like.isVisible()) {
       await like.click();
+      await expect(like).not.toBeVisible();
       return;
     }
-    await page.getByRole("button", { name: /^Pass on / }).click();
+    const pass=page.getByRole("button", {name:/^Pass on /});
+    const before=await pass.getAttribute("aria-label");
+    await pass.click();
+    await expect(pass).not.toHaveAttribute("aria-label",before!);
   }
   throw Error(`No candidate ${name}`);
 }
@@ -66,6 +70,7 @@ test("two people match, exchange a persisted message, agree on a date and indepe
   }
   await alex.getByRole("button", { name: "Find shared possibilities" }).click();
   await alex.getByRole("button", { name: "Propose this date" }).first().click();
+  await expect(alex.getByRole("button", {name:"This feels good — accept"})).toBeVisible();
   for (const p of [alex, jordan]) {
     await p.reload();
     await p.getByRole("button", { name: "This feels good — accept" }).click();
