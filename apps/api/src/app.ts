@@ -753,16 +753,18 @@ export async function buildApp() {
     const s = await member(r);
     const mid = param(r);
     await activeMatch(db, mid, s.user_id);
-    const after = z.coerce
-      .number()
-      .int()
-      .min(0)
-      .default(0)
+    const after = z
+      .string()
+      .max(16)
+      .regex(/^\d+$/)
+      .default("0")
+      .transform(Number)
+      .pipe(z.number().int().min(0).max(Number.MAX_SAFE_INTEGER))
       .parse((r.query as any).after);
     return ok(
       (
         await db.query(
-          "SELECT * FROM messages WHERE match_id=$1 AND sequence>$2 ORDER BY sequence LIMIT 100",
+          "SELECT * FROM messages WHERE match_id=$1 AND sequence>$2::bigint ORDER BY sequence ASC,id ASC LIMIT 100",
           [mid, after],
         )
       ).rows,
