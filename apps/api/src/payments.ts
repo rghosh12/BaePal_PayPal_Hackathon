@@ -1,3 +1,4 @@
+import { paymentResponse } from "./response-contracts.js";
 import { randomUUID } from "node:crypto";
 import { db, one, tx } from "./db.js";
 import { config } from "./config.js";
@@ -6,7 +7,7 @@ import { fail, planFor } from "./domain.js";
 export async function ownPayment(user: string, id: string) {
   const p = await one(
     db,
-    "SELECT p.*,u.buyer_id,u.amount_cents,u.currency,u.plan_id,u.version,u.snapshot FROM payments p JOIN purchases u ON u.id=p.purchase_id WHERE p.id=$1 AND u.buyer_id=$2",
+    "SELECT p.id,p.purchase_id,p.mode,p.state,p.order_id,p.capture_id,p.created_at,p.updated_at,u.amount_cents,u.currency,u.plan_id,u.version,u.snapshot FROM payments p JOIN purchases u ON u.id=p.purchase_id WHERE p.id=$1 AND u.buyer_id=$2",
     [id, user],
   );
   if (!p) return fail(404, "UNAVAILABLE", "Receipt unavailable.");
@@ -16,7 +17,7 @@ export async function ownPayment(user: string, id: string) {
       [id],
     )
   ).rows;
-  return { ...p, refunds };
+  return paymentResponse({ ...p, refunds });
 }
 async function operation(user: string, id: string, kind: string) {
   return tx(async (c) => {

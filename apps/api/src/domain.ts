@@ -1,3 +1,4 @@
+import { catalogueSnapshot } from "./response-contracts.js";
 import { randomUUID } from "node:crypto";
 import { db, one, tx, type Conn } from "./db.js";
 import { ageOn, decrypt, encrypt } from "./crypto.js";
@@ -254,7 +255,9 @@ export async function planDTO(c: Conn | typeof db, p: any, user: string) {
           timeEnd: own.time_end,
         }
       : null,
-    proposal,
+    proposal: proposal
+      ? { ...proposal, snapshot: catalogueSnapshot(proposal.snapshot) }
+      : null,
     acceptedByYou: accepted.includes(user),
     acceptanceCount: accepted.length,
     yourTicket: paid.find((r) => r.buyer_id === user)?.state || "not purchased",
