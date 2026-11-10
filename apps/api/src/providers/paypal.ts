@@ -178,3 +178,28 @@ export function verifiedCapture(order: Order, purchase: any) {
   }
   return capture;
 }
+
+// PayPal USD wire amounts are canonical decimal strings. Do not coerce them
+// through Number or multiply floats: valid cent amounts can round incorrectly.
+export function verifiedRefund(result: any, amountCents: number) {
+  if (
+    !result ||
+    typeof result !== "object" ||
+    Array.isArray(result) ||
+    typeof result.id !== "string" ||
+    !result.id.trim()
+  )
+    throw Error("Refund evidence unavailable");
+  if (result.status === "COMPLETED") {
+    if (!Number.isSafeInteger(amountCents) || amountCents <= 0)
+      throw Error("Refund amount mismatch");
+    if (
+      config.PAYPAL_MODE === "sandbox" &&
+      (result.amount?.currency_code !== "USD" ||
+        typeof result.amount?.value !== "string" ||
+        result.amount.value !== money(amountCents))
+    )
+      throw Error("Refund amount mismatch");
+  }
+  return result;
+}

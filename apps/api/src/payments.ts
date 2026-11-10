@@ -2,7 +2,11 @@ import { paymentResponse } from "./response-contracts.js";
 import { randomUUID } from "node:crypto";
 import { db, one, tx } from "./db.js";
 import { config } from "./config.js";
-import { provider, verifiedCapture } from "./providers/paypal.js";
+import {
+  provider,
+  verifiedCapture,
+  verifiedRefund,
+} from "./providers/paypal.js";
 import { fail, planFor } from "./domain.js";
 export async function ownPayment(user: string, id: string) {
   const p = await one(
@@ -217,14 +221,7 @@ async function refundPayment(pay: any) {
       refund.amount_cents,
       refund.id,
     );
-  if (!result.id) throw Error("Refund evidence unavailable");
-  if (
-    result.status === "COMPLETED" &&
-    config.PAYPAL_MODE === "sandbox" &&
-    (result.amount?.currency_code !== "USD" ||
-      Number(result.amount?.value) * 100 !== refund.amount_cents)
-  )
-    throw Error("Refund amount mismatch");
+  verifiedRefund(result, refund.amount_cents);
   await tx(async (c) => {
     await c.query("SELECT id FROM payments WHERE id=$1 FOR UPDATE", [pay.id]);
     const completed = result.status === "COMPLETED";
