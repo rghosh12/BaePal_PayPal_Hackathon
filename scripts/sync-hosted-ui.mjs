@@ -30,3 +30,8 @@ await copyFile(
   new URL("apps/web/src/components/MatchWhy.tsx", root),
   new URL("apps/hosted/src/ui/MatchWhy.tsx", root),
 );
+
+await copyFile(
+  new URL("apps/web/src/components/IntegrationWorkspace.tsx", root),
+  new URL("apps/hosted/src/ui/IntegrationWorkspace.tsx", root),
+);

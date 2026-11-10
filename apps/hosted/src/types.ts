@@ -9,6 +9,7 @@ export interface Statement {
 export interface Env {
   DB: { prepare(sql: string): Statement };
   FIELD_ENCRYPTION_KEY: string;
+  BAEPAL_INTEGRATIONS_JSON?: string;
 }
 export type State = {
   users: Row[];

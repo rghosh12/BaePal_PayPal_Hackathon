@@ -35,6 +35,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@baepal/integrations':
+        specifier: workspace:*
+        version: link:../../packages/integrations
       '@fastify/cookie':
         specifier: 11.0.2
         version: 11.0.2
@@ -81,6 +84,9 @@ importers:
 
   apps/hosted:
     dependencies:
+      '@baepal/integrations':
+        specifier: workspace:*
+        version: link:../../packages/integrations
       lucide-react:
         specifier: 0.468.0
         version: 0.468.0(react@19.3.1)
@@ -140,6 +146,12 @@ importers:
       '@types/react-dom':
         specifier: 19.2.2
         version: 19.2.2(@types/react@19.2.2)
+
+  packages/integrations:
+    dependencies:
+      zod:
+        specifier: 4.1.12
+        version: 4.1.12
 
 packages:
 

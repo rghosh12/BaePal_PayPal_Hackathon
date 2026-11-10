@@ -15,6 +15,7 @@ const forbidden = [
   "SESSION_SECRET",
   "FIELD_ENCRYPTION_KEY",
   "PAYPAL_CLIENT_SECRET",
+  "BAEPAL_INTEGRATIONS_JSON",
 ]
   .map((k) => process.env[k])
   .filter((v) => v && v.length >= 16);
@@ -37,6 +38,14 @@ async function scan(dir) {
   }
 }
 await scan("apps/web/.next/static");
+// Integration settings are runtime-only. The browser bundle must not import the hub.
+for (const file of await readdir("apps/hosted/dist/server")) {
+  if (!file.endsWith(".js")) continue;
+  const worker = await readFile("apps/hosted/dist/server/" + file, "utf8");
+  if (forbidden.some((value) => worker.includes(value)))
+    throw Error("Configured secret embedded in Worker artifact.");
+}
+
 console.log(
   "Tracked-file and configured-secret browser artifact checks passed. Synthetic demo credentials are intentionally public local fixtures.",
 );

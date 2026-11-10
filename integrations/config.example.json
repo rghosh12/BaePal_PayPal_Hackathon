@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "providers": {
+    "astropods": {
+      "enabled": false,
+      "protocol": "baepal-gateway-v1",
+      "baseUrl": "https://your-gateway.example.com/astropods",
+      "auth": "bearer",
+      "token": "",
+      "operations": ["plan", "explain", "embed"],
+      "timeoutMs": 8000
+    },
+    "elastic": {
+      "enabled": false,
+      "protocol": "baepal-gateway-v1",
+      "baseUrl": "https://your-gateway.example.com/elastic",
+      "auth": "api-key",
+      "token": "",
+      "operations": ["search"],
+      "timeoutMs": 8000
+    },
+    "channel3": {
+      "enabled": false,
+      "protocol": "baepal-gateway-v1",
+      "baseUrl": "https://your-gateway.example.com/channel3",
+      "auth": "bearer",
+      "token": "",
+      "operations": ["products"],
+      "timeoutMs": 8000
+    },
+    "kernel": {
+      "enabled": false,
+      "protocol": "baepal-gateway-v1",
+      "baseUrl": "https://your-gateway.example.com/kernel",
+      "auth": "bearer",
+      "token": "",
+      "operations": ["venues"],
+      "timeoutMs": 8000
+    },
+    "zapier": {
+      "enabled": false,
+      "protocol": "baepal-gateway-v1",
+      "baseUrl": "https://your-gateway.example.com/zapier",
+      "auth": "bearer",
+      "token": "",
+      "operations": ["handoffPreview"],
+      "timeoutMs": 8000
+    }
+  }
+}

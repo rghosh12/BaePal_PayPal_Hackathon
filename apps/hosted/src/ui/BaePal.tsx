@@ -7,6 +7,7 @@ import {
   type FormEvent,
 } from "react";
 import Link from "next/link";
+import IntegrationWorkspace from "./IntegrationWorkspace";
 import TasteWorkspace from "./TasteWorkspace";
 import MatchWhy from "./MatchWhy";
 import { usePathname, useRouter } from "next/navigation";
@@ -1582,6 +1583,29 @@ export default function BaePal() {
                   },
                   "secondary",
                 )}
+              {p.suggestions?.length > 0 &&
+                button(
+                  "Try connected planner",
+                  async () => {
+                    if (
+                      !window.confirm(
+                        "Allow the configured planner to receive eligible public catalogue entries and their listed prices? Exact private budgets, messages and identity are excluded. The eligible price range may still imply preferences. No reservation or payment will be made.",
+                      )
+                    )
+                      return;
+                    const result = await api(
+                      `/date-plans/${p.id}/suggestions`,
+                      "POST",
+                      {
+                        useExternalProvider: true,
+                        allowExternalProcessing: true,
+                      },
+                    );
+                    setData({ ...p, suggestions: result.options });
+                    setNotice(result.label);
+                  },
+                  "secondary",
+                )}
               {p.suggestions?.map((x: Row) => (
                 <article className="suggestion" key={x.id}>
                   <div className="suggestion-icon">
@@ -1900,6 +1924,8 @@ export default function BaePal() {
         </div>
       </>
     );
+  } else if (path === "/settings/integrations") {
+    content = <IntegrationWorkspace api={api} />;
   } else if (path === "/settings/verification") {
     content = (
       <>
@@ -1927,6 +1953,9 @@ export default function BaePal() {
       <>
         {heading("MAKE YOURSELF COMFORTABLE", "Your account & privacy.")}
         <div className="form-stack settings">
+          <Link className="button secondary" href="/settings/integrations">
+            Connected services
+          </Link>
           <div className="panel">
             <h2>Take your time.</h2>
             <p>

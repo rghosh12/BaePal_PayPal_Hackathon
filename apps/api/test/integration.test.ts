@@ -133,6 +133,91 @@ afterAll(async () => {
   await db.end();
 });
 describe("real PostgreSQL access and consent invariants", () => {
+  it("keeps integration routes private, permission-gated and compatible with configured gateways", async () => {
+    const previous = config.BAEPAL_INTEGRATIONS_JSON;
+    try {
+      config.BAEPAL_INTEGRATIONS_JSON = JSON.stringify({
+        version: 1,
+        providers: {
+          astropods: {
+            enabled: true,
+            protocol: "baepal-gateway-v1",
+            baseUrl: "https://gateway.example.com",
+            auth: "bearer",
+            token: "fixture-secret-only",
+            operations: ["plan", "explain"],
+          },
+        },
+      });
+      expect((await req(null, "GET", "/integrations/status")).statusCode).toBe(
+        401,
+      );
+      const status = await data(a, "GET", "/integrations/status");
+      expect(status.providers[0].state).toBe("configured_unverified");
+      expect(JSON.stringify(status)).not.toContain("fixture-secret");
+      const payload = {
+        operation: "explain",
+        allowExternalProcessing: true,
+        input: { interests: ["arts"], sharedInterests: ["arts"] },
+      };
+      expect(
+        (
+          await req(a, "POST", "/integrations/preview", {
+            ...payload,
+            allowExternalProcessing: false,
+          })
+        ).statusCode,
+      ).toBe(400);
+      expect(
+        (
+          await req(a, "POST", "/integrations/preview", payload, {
+            "x-csrf-token": "invalid",
+          })
+        ).statusCode,
+      ).toBe(403);
+      const network = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async (_url, init) => {
+          const body = JSON.parse(init!.body as string);
+          expect(JSON.stringify(body)).not.toContain("budget");
+          if (body.operation === "plan")
+            return Response.json({
+              version: 1,
+              data: {
+                suggestions: [
+                  { id: "art", reason: "An eligible art activity." },
+                ],
+              },
+            });
+          return Response.json({
+            version: 1,
+            data: { summary: "A shared art interest." },
+          });
+        });
+      expect(
+        (await data(a, "POST", "/integrations/preview", payload)).data.summary,
+      ).toBe("A shared art interest.");
+      const p = await plan();
+      expect(
+        (
+          await req(c, "POST", `/date-plans/${p.id}/suggestions`, {
+            useExternalProvider: true,
+            allowExternalProcessing: true,
+          })
+        ).statusCode,
+      ).toBe(404);
+      const ranked = await data(a, "POST", `/date-plans/${p.id}/suggestions`, {
+        useExternalProvider: true,
+        allowExternalProcessing: true,
+      });
+      expect(ranked.options[0].price_cents).toBe(3000);
+      expect(ranked.evidence.mode).toBe("gateway");
+      expect(network).toHaveBeenCalledTimes(2);
+    } finally {
+      config.BAEPAL_INTEGRATIONS_JSON = previous;
+    }
+  });
+
   it("rejects anonymous reads, missing CSRF and wrong origins", async () => {
     expect((await req(null, "GET", "/discover")).statusCode).toBe(401);
     expect(

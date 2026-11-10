@@ -48,6 +48,12 @@ await writeFile(
 );
 const pkg = JSON.parse(await readFile(target + "/package.json", "utf8"));
 pkg.packageManager = "pnpm@11.25.0";
+await cp(root + "packages/integrations", target + "/vendor/integrations", {
+  recursive: true,
+  filter: (path) => !path.split(sep).includes("node_modules"),
+});
+pkg.dependencies["@baepal/integrations"] = "file:./vendor/integrations";
+
 Object.assign(pkg.devDependencies, {
   typescript: "5.9.3",
   "@types/node": "24.10.1",

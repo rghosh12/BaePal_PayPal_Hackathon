@@ -93,3 +93,7 @@ To stop local services, stop `pnpm dev` and run `docker compose -p baepal -f inf
 The uploaded [master prompt](docs/MASTER_BUILD_PROMPT.md) remains the source specification. The requested repository name is `BaePal_PayPal_Hackathon`. Code and illustrations were created for this prototype; third-party implementation/template code and photographs were not copied. [References](docs/REFERENCES.md) records what was actually inspected. Source is licensed under the [MIT License](LICENSE), preserved from the GitHub repository initialization.
 
 GitHub repository: https://github.com/rghosh12/BaePal_PayPal_Hackathon. The original GitHub license commit is preserved alongside the application history.
+
+## Configure external services
+
+Provider endpoints and keys belong in the server-only `BAEPAL_INTEGRATIONS_JSON` secret. Start with [the disabled template](integrations/config.example.json), follow [secure integration setup](docs/INTEGRATIONS.md), and run `pnpm integrations:check`. Account settings → Connected services shows redacted readiness and opt-in previews. Both the Node API and deployed Worker use the same gateway contract; native APIs that use different formats require an adapter. Existing PayPal Sandbox environment keys remain separate; the hosted prototype still uses mock payments.

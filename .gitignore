@@ -22,3 +22,8 @@ work/
 *.tsbuildinfo
 
 apps/web/next-env.d.ts
+
+# Integration secrets and Worker-local bindings
+.dev.vars*
+integrations/*.local.json
+.secrets/
