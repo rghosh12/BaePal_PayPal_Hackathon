@@ -40,6 +40,16 @@ test("long chat catches up, retries a persisted send after lost ack, then clears
     expect(await rows.allTextContents()).toEqual(expected);
     const composer = page.getByRole("textbox", { name: "Your message" });
     const send = page.getByRole("button", { name: "Send message" });
+    await page.setViewportSize({ width: 360, height: 800 });
+    await composer.scrollIntoViewIfNeeded();
+    await expect(composer).toBeVisible();
+    await expect(send).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.setViewportSize({ width: 1280, height: 720 });
     const navigationDraft =
       "CI fictional draft kept while offline and navigating between chats.";
     await alex.setOffline(true);
