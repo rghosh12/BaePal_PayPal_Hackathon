@@ -36,3 +36,7 @@ Issues #22–#37 track the new brief. The first hosted slice provides synthetic 
 ## Payment lifecycle refinements
 
 The Node API now preserves completed/pending refund state and expiry across cancellation retries, and rechecks consent expiry when a provider capture completes. A delayed second capture expires the plan and queues both payments for compensation instead of confirming it. Five dedicated PostgreSQL/mock-provider regressions cover these cases and authoritative late-capture recovery. Full distributed worker leases, partial refunds and real Sandbox evidence remain outstanding in #7/#8. The hosted mock adapter is separate and unchanged by this fix.
+
+## Discovery, response-contract and Postman refinements
+
+Exact discovery retries now respect changed visibility/preferences without returning stale closed match IDs; established paused chat remains governed separately. Proposal and owner financial snapshots project only catalogue/receipt fields, removing derived planning-window bounds and unknown legacy JSON; interactive suggestion bounds remain intentionally available for selecting a valid date. The core/taste Postman collections are exported and executed with isolated fixtures; guarded manual Sandbox artifacts are documented but unexecuted. See `DECISION_REPLAY.md`, `RESPONSE_PRIVACY.md` and `../postman/README.md`. These bounded fixes do not complete signed discovery pagination, API-wide contracts or real provider validation.
