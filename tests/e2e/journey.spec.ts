@@ -18,10 +18,10 @@ async function likeUntil(page: Page, name: string) {
       await expect(like).not.toBeVisible();
       return;
     }
-    const pass=page.getByRole("button", {name:/^Pass on /});
-    const before=await pass.getAttribute("aria-label");
+    const pass = page.getByRole("button", { name: /^Pass on / });
+    const before = await pass.getAttribute("aria-label");
     await pass.click();
-    await expect(pass).not.toHaveAttribute("aria-label",before!);
+    await expect(pass).not.toHaveAttribute("aria-label", before!);
   }
   throw Error(`No candidate ${name}`);
 }
@@ -61,6 +61,9 @@ test("two people match, exchange a persisted message, agree on a date and indepe
     await p
       .getByRole("spinbutton", { name: "Your maximum per ticket (USD)" })
       .fill("40");
+    await p.getByRole("checkbox", { name: "Coffee", exact: true }).uncheck();
+    await p.getByRole("checkbox", { name: "Hiking", exact: true }).uncheck();
+    await p.getByRole("checkbox", { name: "Art", exact: true }).check();
     await p
       .getByRole("button", { name: "Save my private preferences" })
       .click();
@@ -69,11 +72,25 @@ test("two people match, exchange a persisted message, agree on a date and indepe
     );
   }
   await alex.getByRole("button", { name: "Find shared possibilities" }).click();
-  await alex.getByRole("button", { name: "Propose this date" }).first().click();
-  await expect(alex.getByRole("button", {name:"This feels good — accept"})).toBeVisible();
+  await alex
+    .locator("article.suggestion")
+    .filter({
+      has: alex.getByRole("heading", {
+        name: "An evening of art & possibility",
+        exact: true,
+      }),
+    })
+    .getByRole("button", { name: "Propose this date" })
+    .click();
+  await expect(
+    alex.getByRole("button", { name: "This feels good — accept" }),
+  ).toBeVisible();
   for (const p of [alex, jordan]) {
     await p.reload();
     await p.getByRole("button", { name: "This feels good — accept" }).click();
+    await expect(
+      p.getByText("You accepted this version.", { exact: true }),
+    ).toBeVisible();
   }
   for (const p of [alex, jordan]) {
     await p.reload();
@@ -84,6 +101,7 @@ test("two people match, exchange a persisted message, agree on a date and indepe
     await expect(
       p.getByText("MOCK · COMPLETED", { exact: true }),
     ).toBeVisible();
+    await expect(p.getByText("$30.00 USD", { exact: true })).toBeVisible();
   }
   await alex.goto("/dates");
   await alex

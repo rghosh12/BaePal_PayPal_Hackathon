@@ -9,7 +9,7 @@ This is the fast iteration prototype requested by the owner. It is deployed, bac
 1. Open the URL and sign in with the owning ChatGPT account. Choose **Explore the demo → Continue as Alex**. Use the top **Demo persona** selector to explicitly switch between Alex and Jordan.
 2. Like the other persona from Discover, switch, and reciprocate. Open Chats, send a message, switch back, and see the saved conversation. Polling refreshes active chats/plans; data survives reloads.
 3. Plan a date from the chat. Each persona independently saves a private budget, compatible activities and overlapping future times. Propose an option, and have both accept the same version.
-4. Each explicitly opens their own ticket checkout, creates a **mock** order and simulates capture. A first ticket leaves payment pending; both paid tickets confirm the plan.
+4. Choose the paid art or coffee option to exercise checkout; the free walk is confirmed without payment. Each explicitly opens their own ticket checkout, creates a **mock** order and simulates capture. A first ticket leaves payment pending; both paid tickets confirm the plan.
 5. Cancel the plan and inspect simulated refund receipts. Block/unmatch closes chat; your own receipts remain reachable from Profile.
 
 The two personas are controlled by you for testing. Every choice is explicit; the server does not impersonate a real member. All catalogues/illustrations are fictional and all hosted payments/refunds are mock. There is no PayPal call or real booking in the hosted demo. Professional connections and photo uploads are explicitly unavailable. You can also create one personal prototype profile, using fictional information, without entering a separate email/password.

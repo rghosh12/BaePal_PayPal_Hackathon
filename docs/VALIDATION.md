@@ -6,7 +6,7 @@
 - SQL migrations applied; 16 fictional adult profiles and original synthetic artwork seeded in the development database.
 - An isolated `baepal_test` database used for integration tests; suite explicitly refuses other database names and rebuilds fixtures per test.
 - Final suite: **19 tests passed** across two files, including real WebSocket and long-polling delivery/subscription denial, immediate block access revocation, and logout socket disconnection. Final API test run completed in approximately 11 seconds.
-- API TypeScript compile and Next.js optimized build passed; ESLint and workspace typechecks passed. The two authored Playwright tests are discoverable and their TypeScript was separately checked, GitHub Actions subsequently executed both scenarios: the 360px smoke check passed, while the full journey exposed a discovery timing race and an overly broad shared-IP request throttle. Fixes are being verified in the subsequent run.
+- API TypeScript compile and Next.js optimized build passed; ESLint and workspace typechecks passed. The two authored Playwright tests are discoverable and their TypeScript was separately checked, GitHub Actions subsequently executed both scenarios: the 360px smoke check passed, while the full journey exposed a discovery timing race and an overly broad shared-IP request throttle. Those fixes let the browser reach date acceptance. The subsequent failure was a test selecting a free walk and expecting checkout; the payment scenario now explicitly chooses the $30 art experience and awaits persisted acceptance. The subsequent run verifies that correction.
 
 ## Clean-source replay
 
