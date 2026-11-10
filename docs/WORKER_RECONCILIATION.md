@@ -1,0 +1,11 @@
+# Cancellation reconciliation fencing
+
+Before starting an updated Node API or worker, run **`pnpm db:migrate`** against its configured database. Migration `003_outbox_generation.sql` adds a nonnegative `generation` column to existing outbox rows, initially zero. `server.ts` does not apply migrations automatically. The hosted mock-payment adapter uses separate storage and is unchanged.
+
+A newly verified late capture rearms its cancellation job and increments that generation. Once an older attempt finishes its provider work, it locks the plan and then the outbox row. It can update financial status, retry scheduling or job completion only while the row remains pending at the generation it originally read. A stale success or failure therefore cannot overwrite newly queued compensation or postpone it with an old backoff.
+
+Finalization re-reads committed payment/refund evidence under those locks. Captured funds are reported returned only when the payment is refunded and its full-amount refund is verified completed. A failed lookup for an outstanding order retains a pending job and failure status rather than claiming the order unpaid. Reads do not lock payment rows: capture reconciliation locks a payment before the plan, so adding reverse payment locks here would risk deadlock. Provider calls run outside these finalization transactions.
+
+Three dedicated PostgreSQL/mock-provider tests cover an older attempt's stale success, stale failure, and an ordinary provider lookup failure. The first two failed before the fix: stale success marked the rearmed job processed; stale failure changed its attempts and delayed it by 30 seconds. They now preserve the new pending generation and immediate schedule, then verify a subsequent tick completes exactly one refund.
+
+This is a fence for cancellation bookkeeping, not a distributed job lease or exactly-once provider execution guarantee. Workers still use the existing process-local tick guard; cross-process claims, lease expiry, capped exponential retries, dead-letter review and operational alerts remain in issue #8. Native Sandbox evidence and other payment invariants remain in #7. Apply migrations and deploy API/worker code together; rolling compatibility with older workers is not claimed.

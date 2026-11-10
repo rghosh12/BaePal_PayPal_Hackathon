@@ -141,7 +141,7 @@ export async function recordOrder(id: string, order: any) {
       consentExpired
     ) {
       await c.query(
-        "INSERT INTO outbox(id,kind,aggregate_id) VALUES($1,'cancel_plan',$2) ON CONFLICT(kind,aggregate_id) DO UPDATE SET state='pending',available_at=now()",
+        "INSERT INTO outbox(id,kind,aggregate_id,generation) VALUES($1,'cancel_plan',$2,1) ON CONFLICT(kind,aggregate_id) DO UPDATE SET state='pending',available_at=now(),generation=outbox.generation+1",
         [randomUUID(), plan.id],
       );
       await c.query(
@@ -248,6 +248,71 @@ async function refundPayment(pay: any) {
     }
   });
 }
+// No provider calls run under these locks. recordOrder takes the plan lock before
+// rearming the outbox; this matching order makes the generation fence atomic with
+// financial-state bookkeeping. Payment rows are read without locks because
+// recordOrder locks a payment before its plan.
+async function finishCancellation(job: any, failed = false) {
+  await tx(async (c) => {
+    const plan = await one(
+      c,
+      "SELECT id FROM date_plans WHERE id=$1 FOR UPDATE",
+      [job.aggregate_id],
+    );
+    if (!plan) return;
+    const current = await one(
+      c,
+      "SELECT state,generation FROM outbox WHERE id=$1 FOR UPDATE",
+      [job.id],
+    );
+    if (
+      !current ||
+      current.state !== "pending" ||
+      String(current.generation) !== String(job.generation)
+    )
+      return;
+    const payments = (
+      await c.query(
+        "SELECT p.state,p.order_id,p.capture_id,u.amount_cents,r.state AS refund_state,r.amount_cents AS refunded_cents FROM payments p JOIN purchases u ON u.id=p.purchase_id LEFT JOIN refunds r ON r.payment_id=p.id WHERE u.plan_id=$1",
+        [job.aggregate_id],
+      )
+    ).rows;
+    const settled = payments.every((pay) => {
+      const refundComplete =
+        pay.state === "refunded" &&
+        pay.refund_state === "completed" &&
+        pay.refunded_cents === pay.amount_cents;
+      return (
+        !["completed", "unknown", "capture_pending", "pending"].includes(
+          pay.state,
+        ) &&
+        (!pay.capture_id || refundComplete) &&
+        (pay.state !== "refunded" || refundComplete) &&
+        // Failed lookup cannot establish that an existing order was never paid.
+        (!failed || !pay.order_id || refundComplete)
+      );
+    });
+    await c.query("UPDATE date_plans SET financial_state=$2 WHERE id=$1", [
+      job.aggregate_id,
+      settled
+        ? payments.some((pay) => pay.capture_id)
+          ? "refunded"
+          : "unpaid"
+        : failed
+          ? "refund_failed"
+          : "refund_pending",
+    ]);
+    if (settled)
+      await c.query("UPDATE outbox SET state='processed' WHERE id=$1", [
+        job.id,
+      ]);
+    else
+      await c.query(
+        "UPDATE outbox SET attempts=attempts+1,available_at=now()+($2::integer * interval '1 second') WHERE id=$1",
+        [job.id, failed ? 30 : 15],
+      );
+  });
+}
 let running = false;
 export async function workerTick() {
   if (running) return;
@@ -320,7 +385,6 @@ export async function workerTick() {
             [job.aggregate_id],
           )
         ).rows;
-        let all = true;
         for (const pay of pays) {
           if (pay.order_id && !["completed", "refunded"].includes(pay.state)) {
             await recordOrder(pay.id, await provider.getOrder(pay.order_id));
@@ -329,45 +393,11 @@ export async function workerTick() {
             ]);
             Object.assign(pay, fresh);
           }
-          if (pay.state === "completed") {
-            await refundPayment(pay);
-            const r = await one(
-              db,
-              "SELECT state FROM refunds WHERE payment_id=$1",
-              [pay.id],
-            );
-            if (r?.state !== "completed") all = false;
-          } else if (
-            ["unknown", "capture_pending", "pending"].includes(pay.state)
-          )
-            all = false;
+          if (pay.state === "completed") await refundPayment(pay);
         }
-        await db.query("UPDATE date_plans SET financial_state=$2 WHERE id=$1", [
-          job.aggregate_id,
-          all
-            ? pays.some((p) => p.capture_id)
-              ? "refunded"
-              : "unpaid"
-            : "refund_pending",
-        ]);
-        if (all)
-          await db.query("UPDATE outbox SET state='processed' WHERE id=$1", [
-            job.id,
-          ]);
-        else
-          await db.query(
-            "UPDATE outbox SET available_at=now()+interval '15 seconds',attempts=attempts+1 WHERE id=$1",
-            [job.id],
-          );
+        await finishCancellation(job);
       } catch {
-        await db.query(
-          "UPDATE outbox SET attempts=attempts+1,available_at=now()+interval '30 seconds' WHERE id=$1",
-          [job.id],
-        );
-        await db.query(
-          "UPDATE date_plans SET financial_state='refund_failed' WHERE id=$1",
-          [job.aggregate_id],
-        );
+        await finishCancellation(job, true);
       }
     }
   } finally {
