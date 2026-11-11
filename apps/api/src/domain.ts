@@ -173,6 +173,11 @@ export async function sendMessage(
   client: string,
 ) {
   return tx(async (c) => {
+    // Count and retry IDs are sender-wide, so serialize before any match lock.
+    // Recheck match/member authorization after waiting for admission.
+    await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      `message-sender:${user}`,
+    ]);
     const m = await activeMatch(c, id, user, true);
     const existing = await one(
       c,
@@ -190,7 +195,7 @@ export async function sendMessage(
     }
     const recent = await one(
       c,
-      "SELECT count(*)::int AS n FROM messages WHERE sender_id=$1 AND created_at>now()-interval '1 minute'",
+      "SELECT count(*)::int AS n FROM messages WHERE sender_id=$1 AND created_at>statement_timestamp()-interval '1 minute'",
       [user],
     );
     if (recent.n >= 30)
@@ -206,7 +211,7 @@ export async function sendMessage(
     ]);
     return one(
       c,
-      "INSERT INTO messages(id,match_id,sequence,sender_id,client_id,text) VALUES($1,$2,$3,$4,$5,$6) RETURNING *",
+      "INSERT INTO messages(id,match_id,sequence,sender_id,client_id,text,created_at) VALUES($1,$2,$3,$4,$5,$6,clock_timestamp()) RETURNING *",
       [randomUUID(), id, sequence, user, client, text],
     );
   });
