@@ -69,7 +69,7 @@ pnpm exec playwright install chromium
 pnpm test:e2e
 ```
 
-Run browser tests against a **freshly seeded, disposable** development database. The two-person test consumes likes and creates purchases. Browser binaries were not installed or run in this managed environment because its browser-control tool was unavailable. CI includes browser installation and the test commands, but no GitHub CI run has been observed.
+Run browser tests against a **freshly seeded, disposable** development database. The two-person test consumes likes and creates purchases. Browser validation runs in GitHub Actions. [CI run 42909909978](https://github.com/rghosh12/BaePal_PayPal_Hackathon/actions/runs/42909909978) passed on commit `30db892`, including two original application browser cases and four hosted prototype cases. The hosted suite covers long chat history, offline draft recovery, uncertain-send retries and blocked-chat cleanup. This is prototype evidence; real-provider and broader accessibility gates remain open.
 
 ## Architecture
 
