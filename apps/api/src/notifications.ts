@@ -8,6 +8,10 @@ export const NOTIFICATION_TITLES: Record<string, string> = {
   "date.confirmed": "A date plan is confirmed.",
   "payment.completed": "Your PayPal payment completed.",
   "refund.completed": "Your PayPal refund completed.",
+  "deposit.held": "Your match placed their no-show hold.",
+  "deposit.released": "You both checked in. Both holds were released.",
+  "deposit.captured": "Your no-show hold was captured.",
+  "deposit.compensated": "Your match didn't show. Their hold is being paid out to you.",
   "account.warning":
     "BaePal safety reviewed a report about your account. Please review our community guidelines.",
 };
@@ -46,7 +50,7 @@ export async function inbox(c: Conn, user: string) {
     await c.query(
       `SELECT n.id,n.category,n.match_id,n.read_at,n.created_at FROM notifications n
        LEFT JOIN matches m ON m.id=n.match_id
-       WHERE n.user_id=$1 AND (n.match_id IS NULL OR m.status='active' OR n.category IN ('payment.completed','refund.completed'))
+       WHERE n.user_id=$1 AND (n.match_id IS NULL OR m.status='active' OR n.category IN ('payment.completed','refund.completed','deposit.captured','deposit.compensated'))
        ORDER BY n.created_at DESC LIMIT 50`,
       [user],
     )
@@ -56,7 +60,7 @@ export async function inbox(c: Conn, user: string) {
       id: n.id,
       category: n.category,
       title: NOTIFICATION_TITLES[n.category] ?? "You have an update.",
-      matchId: n.category.startsWith("payment") || n.category.startsWith("refund") ? null : n.match_id,
+      matchId: /^(payment|refund|deposit)\./.test(n.category) ? null : n.match_id,
       read: !!n.read_at,
       createdAt: n.created_at,
     })),

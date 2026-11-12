@@ -23,6 +23,14 @@ import sharp from "sharp";
 import { z, ZodError } from "zod";
 import { db, tx, one } from "./db.js";
 import { inbox, matchMembers, notify } from "./notifications.js";
+import {
+  authorizeHold,
+  checkIn,
+  claimNoShow,
+  createHold,
+  depositStatus,
+  releaseStaleHolds,
+} from "./deposits.js";
 import { config } from "./config.js";
 import { hash, keyed, token, equal, ageOn, decrypt } from "./crypto.js";
 import {
@@ -1126,7 +1134,7 @@ export async function buildApp() {
   app.post("/api/v1/date-plans/:id/proposals", async (r) => {
     const s = await member(r);
     const b = body(r, Contracts.Proposal);
-    return tx(async (c) => {
+    const result = await tx(async (c) => {
       const p = await planFor(c, param(r), s.user_id, true);
       if (p.version !== b.expectedVersion)
         return fail(
@@ -1180,6 +1188,8 @@ export async function buildApp() {
       );
       return ok({ version });
     });
+    await releaseStaleHolds(param(r)).catch((e) => r.log.warn(e, "hold release deferred"));
+    return result;
   });
   app.post("/api/v1/date-plans/:id/accept", async (r) => {
     const s = await member(r);
@@ -1235,7 +1245,7 @@ export async function buildApp() {
   });
   app.post("/api/v1/date-plans/:id/cancel", async (r) => {
     const s = await member(r);
-    return tx(async (c) => {
+    const result = await tx(async (c) => {
       const p = await planFor(c, param(r), s.user_id, true);
       const b = body(r, z.object({ expectedVersion: z.number().int() }));
       if (p.version !== b.expectedVersion)
@@ -1252,7 +1262,41 @@ export async function buildApp() {
         message: "Refunds, if applicable, are reconciled separately.",
       });
     });
+    await releaseStaleHolds(param(r)).catch((e) => r.log.warn(e, "hold release deferred"));
+    return result;
   });
+  app.get("/api/v1/date-plans/:id/deposit", async (r) => {
+    const s = await member(r);
+    return ok(await depositStatus(param(r), s.user_id));
+  });
+  app.post(
+    "/api/v1/date-plans/:id/deposit",
+    { config: { rateLimit: { max: 20, timeWindow: "1 hour" } } },
+    async (r) => {
+      const s = await member(r);
+      return ok(await createHold(s.user_id, param(r)));
+    },
+  );
+  app.post("/api/v1/date-plans/:id/deposit/authorize", async (r) => {
+    const s = await member(r);
+    return ok(await authorizeHold(s.user_id, param(r)));
+  });
+  app.post("/api/v1/date-plans/:id/check-in", async (r) => {
+    const s = await member(r);
+    return ok(await checkIn(s.user_id, param(r)));
+  });
+  app.post(
+    "/api/v1/date-plans/:id/no-show",
+    { config: { rateLimit: { max: 10, timeWindow: "1 hour" } } },
+    async (r) => {
+      const s = await member(r);
+      const b = body(
+        r,
+        z.object({ payoutEmail: z.string().email().max(254).optional() }).strict(),
+      );
+      return ok(await claimNoShow(s.user_id, param(r), b.payoutEmail));
+    },
+  );
   app.post("/api/v1/purchases", async (r) => {
     const s = await member(r);
     const b = body(r, Contracts.Purchase);

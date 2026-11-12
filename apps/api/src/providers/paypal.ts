@@ -15,6 +15,11 @@ export interface PaymentProvider {
     headers: Record<string, unknown>,
     event: unknown,
   ): Promise<boolean>;
+  createHoldOrder(amount: number, depositId: string, planId: string, key: string): Promise<Order>;
+  authorizeOrder(id: string, key: string): Promise<Order>;
+  voidAuthorization(id: string, key: string): Promise<void>;
+  captureAuthorization(id: string, amount: number, key: string): Promise<any>;
+  createPayout(email: string, amount: number, note: string, key: string): Promise<any>;
 }
 const money = (amount: number) => {
   if (!Number.isSafeInteger(amount) || amount < 0)
@@ -138,6 +143,97 @@ export class SandboxPayPal implements PaymentProvider {
   getRefund(id: string) {
     return this.request(`/v2/payments/refunds/${encodeURIComponent(id)}`);
   }
+  createHoldOrder(amount: number, depositId: string, planId: string, key: string) {
+    return this.request(
+      "/v2/checkout/orders",
+      "POST",
+      {
+        intent: "AUTHORIZE",
+        purchase_units: [
+          {
+            reference_id: depositId,
+            custom_id: depositId,
+            description: "BaePal no-show protection hold (released if you show up)",
+            payee: { merchant_id: config.PAYPAL_MERCHANT_ID },
+            amount: { currency_code: "USD", value: money(amount) },
+          },
+        ],
+        payment_source: {
+          paypal: {
+            experience_context: {
+              brand_name: "BaePal Date Protection",
+              user_action: "CONTINUE",
+              shipping_preference: "NO_SHIPPING",
+              return_url: `${config.APP_ORIGIN}/dates/${planId}?hold=approved`,
+              cancel_url: `${config.APP_ORIGIN}/dates/${planId}?hold=cancelled`,
+            },
+          },
+        },
+      },
+      key,
+    );
+  }
+  authorizeOrder(id: string, key: string) {
+    return this.request(
+      `/v2/checkout/orders/${encodeURIComponent(id)}/authorize`,
+      "POST",
+      {},
+      key,
+    );
+  }
+  async voidAuthorization(id: string, key: string) {
+    const access_token = await this.accessToken();
+    const r = await fetch(
+      `${this.base}/v2/payments/authorizations/${encodeURIComponent(id)}/void`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          "PayPal-Request-Id": key,
+        },
+        signal: AbortSignal.timeout(15000),
+      },
+    );
+    // 204 on success; 422 AUTHORIZATION_ALREADY_VOIDED on replay is also final.
+    if (!r.ok && r.status !== 422) {
+      console.error(JSON.stringify({ paypal: { op: "void", status: r.status } }));
+      throw Error("PayPal void requires reconciliation");
+    }
+  }
+  captureAuthorization(id: string, amount: number, key: string) {
+    return this.request(
+      `/v2/payments/authorizations/${encodeURIComponent(id)}/capture`,
+      "POST",
+      {
+        amount: { currency_code: "USD", value: money(amount) },
+        final_capture: true,
+      },
+      key,
+    );
+  }
+  createPayout(email: string, amount: number, note: string, key: string) {
+    return this.request(
+      "/v1/payments/payouts",
+      "POST",
+      {
+        sender_batch_header: {
+          sender_batch_id: key,
+          email_subject: "You have a payout from BaePal",
+          email_message: note,
+        },
+        items: [
+          {
+            recipient_type: "EMAIL",
+            receiver: email,
+            amount: { currency: "USD", value: money(amount) },
+            note,
+            sender_item_id: key,
+          },
+        ],
+      },
+      key,
+    );
+  }
   async verifyWebhook(headers: Record<string, unknown>, event: unknown) {
     // Without a configured webhook ID nothing can be verified: fail closed.
     if (!config.PAYPAL_WEBHOOK_ID) return false;
@@ -195,6 +291,42 @@ export class MockPayPal implements PaymentProvider {
   }
   async verifyWebhook() {
     return false;
+  }
+  async createHoldOrder(amount: number, depositId: string, _planId: string, key: string) {
+    return {
+      id: `MOCK-HOLD-${key}`,
+      status: "CREATED",
+      purchase_units: [
+        {
+          reference_id: depositId,
+          amount: { currency_code: "USD", value: money(amount) },
+        },
+      ],
+    };
+  }
+  async authorizeOrder(id: string, _key: string) {
+    return {
+      id,
+      status: "COMPLETED",
+      purchase_units: [
+        {
+          payments: {
+            authorizations: [{ id: `AUTH-${id}`, status: "CREATED" }],
+          },
+        },
+      ],
+    };
+  }
+  async voidAuthorization() {}
+  async captureAuthorization(id: string, amount: number) {
+    return {
+      id: `CAP-${id}`,
+      status: "COMPLETED",
+      amount: { currency_code: "USD", value: money(amount) },
+    };
+  }
+  async createPayout(_email: string, _amount: number, _note: string, key: string) {
+    return { batch_header: { payout_batch_id: `PAYOUT-${key}`, batch_status: "SUCCESS" } };
   }
 }
 export const provider: PaymentProvider =

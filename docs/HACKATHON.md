@@ -21,6 +21,7 @@ First dates get awkward around money. Nobody wants to say "that's above my budge
 | **AI date planner** | The server first filters the catalogue by **both** private budgets, activities and overlapping time windows. The model only ranks those eligible options and explains its choices. Invented IDs are rejected, and the private budgets never reach the model. |
 | Date consent | Versioned proposals. Both members accept the same version; any edit clears earlier acceptances. |
 | **PayPal checkout** | Official PayPal JS SDK Smart Buttons, plus a hosted-redirect fallback. The server creates an Orders v2 `CAPTURE` order from the accepted plan snapshot, so the client cannot set the amount, payee or buyer. A separate capture step runs after approval, and the server verifies the amount, currency, payee, `reference_id` and `custom_id` before marking a ticket paid. |
+| **No-show protection** | Once both accept, each person authorizes a **$10 PayPal hold** (Orders v2 `intent: AUTHORIZE`), so nothing is charged. If both tap **I'm here**, both authorizations are **voided**. If one person ghosts, the one who showed up claims it: the absent person's hold is **captured** and sent to the other person with **PayPal Payouts**. New proposals and cancellations release stale holds automatically. |
 | Two independent tickets | Each person pays their own ticket. One capture makes the plan `partially_paid`; two make it `confirmed`. |
 | Refunds & reconciliation | Cancelling refunds each capture through `/v2/payments/captures/{id}/refund` using a stable `PayPal-Request-Id`. A background worker handles expiry compensation and retries. Webhook events are signature-verified and deduplicated through an inbox. |
 | Receipts | Private per-buyer receipts with order/capture/refund references. These stay accessible after a block or unmatch. |
@@ -30,6 +31,8 @@ First dates get awkward around money. Nobody wants to say "that's above my budge
 - **Orders v2 API** (server-side): create order (`intent: CAPTURE`, payee merchant ID, `reference_id`/`custom_id` = BaePal purchase ID), get order, capture order.
 - **PayPal JavaScript SDK Buttons** (browser) for buyer approval. Only the public client ID reaches the browser.
 - **Payments v2 refunds** for cancellations and compensation.
+- **Authorize → void / capture** (`/v2/checkout/orders/{id}/authorize`, `/v2/payments/authorizations/{id}/void` and `/capture`) for the no-show hold, through a second SDK instance with `intent=authorize`.
+- **Payouts** (`/v1/payments/payouts`) to pay the captured hold to the member who showed up. The request uses a stable `sender_batch_id`, so a retried claim can't pay twice. The Sandbox business account behind your REST app needs Payouts enabled; it usually is by default in Sandbox.
 - **Webhooks**: `verify-webhook-signature`, inbox deduplication and out-of-order handling.
 - **Idempotency**: each create, capture and refund call has its own stable `PayPal-Request-Id`, so retries never double-charge.
 - **Safety invariants**: client redirects and `onApprove` are not treated as proof of payment; only verified capture data from PayPal is. Live mode is not supported, and Sandbox moves only test funds.
@@ -119,7 +122,8 @@ It prints no secrets. On startup, the API also logs whether PayPal accepted the 
 4. **Plan a date** → each person saves a *private* budget and time window → **Find shared possibilities**: AI-ranked options that fit both budgets, each with a reason.
 5. Propose → both accept the same version.
 6. Each opens **checkout** → **PayPal** button → approve with the Sandbox buyer → the server captures and verifies. After the first ticket, the plan shows `partially_paid`; after the second, it shows `confirmed`.
-7. **Cancel the plan** → refunds go to PayPal; receipts show the refund IDs.
+7. **No-show protection** (the main demo moment): both people place the $10 PayPal hold. Alex taps **I'm here**; Jordan doesn't. Alex taps **They didn't show** and enters a Sandbox personal email. Jordan's hold is captured and paid out to Alex on screen, and Alex's own hold is released. To show the happy path instead, have both people check in, and both holds are voided. In demo mode the time window is relaxed so this fits in a walkthrough.
+8. **Cancel the plan** → refunds go to PayPal; receipts show the refund IDs.
 8. Optional: log in as the moderator and go to **Reports**. You can dismiss, warn, suspend, restore or escalate a report; each action needs a reason and is written to the audit log. Suspending logs the member out immediately, and the reporter only ever sees "received" or "closed".
 
 ## Honest limits

@@ -12,6 +12,7 @@ import TasteWorkspace from "./TasteWorkspace";
 import MatchWhy from "./MatchWhy";
 import ChatThread from "./ChatThread";
 import PayPalCheckout from "./PayPalCheckout";
+import DepositPanel from "./DepositPanel";
 import { activateChatActor, chatScope, revokeChat } from "./chat-state";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -215,6 +216,10 @@ export default function BaePal() {
           hasData = true;
         } else if (path.startsWith("/dates/") && path !== "/dates/new") {
           fresh = await api(`/date-plans/${path.split("/")[2]}`);
+          if (!conf.hosted)
+            fresh.deposit = await api(
+              `/date-plans/${path.split("/")[2]}/deposit`,
+            ).catch(() => null);
           hasData = true;
           datePlan = true;
         } else if (path.startsWith("/checkout/")) {
@@ -1610,7 +1615,7 @@ export default function BaePal() {
     const target = (n: Row) =>
       n.category === "message.received" || n.category === "match.created"
         ? n.matchId && `/chats/${n.matchId}`
-        : n.category.startsWith("date.")
+        : /^(date|deposit)\./.test(n.category)
           ? "/dates"
           : "/payments";
     content = (
@@ -2150,6 +2155,19 @@ export default function BaePal() {
                   Both people accept the same version before checkout.
                 </p>
               </div>
+            )}
+            {p.deposit?.eligible && !closed && (
+              <DepositPanel
+                planId={p.id}
+                d={p.deposit}
+                config={config}
+                api={api}
+                busy={busy}
+                act={act}
+                refresh={refresh}
+                setNotice={setNotice}
+                setError={setError}
+              />
             )}
             {!closed &&
               button(

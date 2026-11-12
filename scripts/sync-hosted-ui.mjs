@@ -36,7 +36,13 @@ await copyFile(
   new URL("apps/hosted/src/ui/IntegrationWorkspace.tsx", root),
 );
 
-for (const name of ["ChatThread.tsx", "chat-state.ts", "PayPalCheckout.tsx"])
+for (const name of [
+  "ChatThread.tsx",
+  "chat-state.ts",
+  "PayPalCheckout.tsx",
+  "PayPalHold.tsx",
+  "DepositPanel.tsx",
+])
   await copyFile(
     new URL("apps/web/src/components/" + name, root),
     new URL("apps/hosted/src/ui/" + name, root),
