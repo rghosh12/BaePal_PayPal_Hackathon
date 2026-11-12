@@ -131,6 +131,21 @@ await tx(async (c) => {
       ],
     );
   }
+  // A few incoming likes so the Likes inbox has content in the demo.
+  for (const [actor, target] of [
+    ["riley", "alex"],
+    ["taylor", "alex"],
+    ["morgan", "jordan"],
+    ["casey", "jordan"],
+  ])
+    await c.query(
+      "INSERT INTO decisions(actor_id,target_id,action,mutation_id) SELECT a.id,b.id,'like',$3 FROM users a, users b WHERE a.email=$1 AND b.email=$2 ON CONFLICT DO NOTHING",
+      [
+        `${actor}@demo.baepal.invalid`,
+        `${target}@demo.baepal.invalid`,
+        randomUUID(),
+      ],
+    );
   for (const x of [
     {
       id: "coffee",

@@ -22,6 +22,7 @@ import argon2 from "argon2";
 import sharp from "sharp";
 import { z, ZodError } from "zod";
 import { db, tx, one } from "./db.js";
+import { inbox, matchMembers, notify } from "./notifications.js";
 import { config } from "./config.js";
 import { hash, keyed, token, equal, ageOn } from "./crypto.js";
 import {
@@ -55,6 +56,14 @@ const body = (r: FastifyRequest, s: z.ZodType<any>) => s.parse(r.body);
 const param = (r: FastifyRequest, key = "id") =>
   id.parse((r.params as any)[key]);
 const ok = (data: any) => ({ data });
+// Explanations use only interests both members publicly declared.
+const withShared = (cards: any[], own: any) =>
+  cards.map((c) => ({
+    ...c,
+    sharedInterests: (c.interests || []).filter((i: string) =>
+      (own?.interests || []).includes(i),
+    ),
+  }));
 export async function authenticate(raw: string | undefined) {
   if (!raw) return fail(401, "SESSION_EXPIRED", "Please log in to continue.");
   const s = await one(
@@ -69,11 +78,19 @@ export async function buildApp() {
   const app = Fastify({
     logger: false,
     bodyLimit: 15 * 1024 * 1024,
-    trustProxy: false,
+    // Narrowed for Fastify's overloads; strings/numbers are valid trustProxy values too.
+    trustProxy: config.TRUST_PROXY as boolean,
   });
   await app.register(cookie);
   await app.register(helmet, { contentSecurityPolicy: false });
-  await app.register(rateLimit, { max: 600, timeWindow: "1 minute" });
+  // All browser traffic arrives through the web proxy, so limit per session
+  // where one exists instead of per proxy IP.
+  await app.register(rateLimit, {
+    max: 600,
+    timeWindow: "1 minute",
+    keyGenerator: (r) =>
+      r.cookies?.baepal ? `s:${hash(r.cookies.baepal)}` : `ip:${r.ip}`,
+  });
   const io = new Server(app.server, {
     cors: { origin: config.APP_ORIGIN, credentials: true },
     maxHttpBufferSize: 8192,
@@ -684,6 +701,45 @@ export async function buildApp() {
       .type("image/jpeg")
       .send(media.bytes);
   });
+  // Titles are generic so names, budgets and payer details never leave the
+  // owner's authenticated views.
+  app.get("/api/v1/notifications", async (r) => {
+    const s = await member(r);
+    return ok(await tx((c) => inbox(c, s.user_id)));
+  });
+  app.post("/api/v1/notifications/read", async (r) => {
+    const s = await member(r);
+    const b = body(
+      r,
+      z.object({ ids: z.array(z.string().uuid()).max(50).optional() }).strict(),
+    );
+    const res = b.ids
+      ? await db.query(
+          "UPDATE notifications SET read_at=now() WHERE user_id=$1 AND id=ANY($2::uuid[]) AND read_at IS NULL",
+          [s.user_id, b.ids],
+        )
+      : await db.query(
+          "UPDATE notifications SET read_at=now() WHERE user_id=$1 AND read_at IS NULL",
+          [s.user_id],
+        );
+    return ok({ marked: res.rowCount ?? 0 });
+  });
+  // Members who liked you and are still eligible, where you have not decided yet.
+  // Accept/dismiss go through the same POST /decisions path as Discover.
+  app.get("/api/v1/likes", async (r) => {
+    const s = await member(r);
+    const likers = (
+      await db.query(
+        "SELECT d.actor_id FROM decisions d WHERE d.target_id=$1 AND d.action='like' AND NOT EXISTS (SELECT 1 FROM decisions o WHERE o.actor_id=$1 AND o.target_id=d.actor_id) ORDER BY d.actor_id LIMIT 50",
+        [s.user_id],
+      )
+    ).rows;
+    const cards = [];
+    for (const x of likers)
+      if (await eligible(db, s.user_id, x.actor_id))
+        cards.push(await publicProfile(db, x.actor_id));
+    return ok(withShared(cards, await publicProfile(db, s.user_id)));
+  });
   app.get("/api/v1/discover", async (r) => {
     const s = await member(r);
     const ids = (
@@ -713,7 +769,7 @@ export async function buildApp() {
           a.interests.filter((i: string) => own.interests.includes(i)).length ||
         a.user_id.localeCompare(b.user_id),
     );
-    return ok(cards);
+    return ok(withShared(cards, own));
   });
   // ---- AI assistance: drafts only, never autonomous actions ----
   app.post(
@@ -1011,7 +1067,7 @@ export async function buildApp() {
   });
   app.post(
     "/api/v1/date-plans/:id/suggestions",
-    { config: { rateLimit: { max: 6, timeWindow: "1 hour" } } },
+    { config: { rateLimit: { max: 20, timeWindow: "1 hour" } } },
     async (r) => {
       const s = await member(r);
       const p = await planFor(db, param(r), s.user_id);
@@ -1115,6 +1171,13 @@ export async function buildApp() {
         "UPDATE date_plans SET version=$2,status='proposed' WHERE id=$1",
         [p.id, version],
       );
+      await notify(
+        c,
+        (await matchMembers(c, p.match_id)).filter((u) => u !== s.user_id),
+        `proposal:${p.id}:${version}`,
+        "date.proposed",
+        p.match_id,
+      );
       return ok({ version });
     });
   });
@@ -1149,7 +1212,7 @@ export async function buildApp() {
         "SELECT count(*)::int AS n FROM acceptances WHERE plan_id=$1 AND version=$2",
         [p.id, p.version],
       );
-      if (count.n === 2)
+      if (count.n === 2) {
         await c.query(
           "UPDATE date_plans SET status=$2,financial_state=$3 WHERE id=$1",
           [
@@ -1158,6 +1221,15 @@ export async function buildApp() {
             proposal.snapshot.price_cents === 0 ? "free" : "unpaid",
           ],
         );
+        if (proposal.snapshot.price_cents === 0)
+          await notify(
+            c,
+            await matchMembers(c, p.match_id),
+            `confirmed:${p.id}:${p.version}`,
+            "date.confirmed",
+            p.match_id,
+          );
+      }
       return ok({ accepted: true });
     });
   });

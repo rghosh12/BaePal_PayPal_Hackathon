@@ -1,21 +1,19 @@
 import type { NextConfig } from "next";
-// Render's private-network `hostport` has no scheme; accept both forms.
-const rawApi = process.env.API_ORIGIN || "http://127.0.0.1:4000";
-process.env.API_ORIGIN = /^https?:\/\//.test(rawApi)
-  ? rawApi
-  : `http://${rawApi}`;
+// Accept a bare host:port (no scheme) as well as a full origin.
+const rawApi = (process.env.API_ORIGIN || "http://127.0.0.1:4000").replace(
+  /\/$/,
+  "",
+);
+const api = /^https?:\/\//.test(rawApi) ? rawApi : `http://${rawApi}`;
 const config: NextConfig = {
   poweredByHeader: false,
+  // Socket.IO requests `/socket.io/?EIO=…`; a trailing-slash redirect breaks it.
+  skipTrailingSlashRedirect: true,
   async rewrites() {
     return [
-      {
-        source: "/api/:path*",
-        destination: `${process.env.API_ORIGIN || "http://127.0.0.1:4000"}/api/:path*`,
-      },
-      {
-        source: "/socket.io/:path*",
-        destination: `${process.env.API_ORIGIN || "http://127.0.0.1:4000"}/socket.io/:path*`,
-      },
+      { source: "/api/:path*", destination: `${api}/api/:path*` },
+      { source: "/socket.io/", destination: `${api}/socket.io/` },
+      { source: "/socket.io/:path*", destination: `${api}/socket.io/:path*` },
     ];
   },
   async headers() {

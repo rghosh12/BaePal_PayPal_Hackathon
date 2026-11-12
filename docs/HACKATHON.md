@@ -13,7 +13,8 @@ First dates get awkward around money. Nobody wants to say "that's above my budge
 | Area | What works |
 | --- | --- |
 | Accounts | Email signup with confirmation code, Argon2id passwords, opaque HttpOnly sessions, CSRF and origin checks, server-side 18+ check, resumable onboarding |
-| Matching | Reciprocal age/gender/city discovery, like/pass, transactional mutual match (race-safe), ranking by shared declared interests |
+| Matching | Reciprocal age/gender/city discovery, like/pass, transactional mutual match (race-safe), ranking by shared declared interests, a "why you might click" explanation built only from interests both people declared publicly, and a **Likes inbox** to like back or quietly dismiss |
+| Updates inbox | Deduplicated in-app notifications for matches, messages, date proposals and confirmations, PayPal captures and refunds. Titles are generic (no names, budgets or payer details), only the owner can read them or mark them read, and dating events disappear once a match is closed or blocked. |
 | Chat | Persisted chat over REST + Socket.IO with ordered catch-up, idempotent retries, block/report/unmatch with immediate revocation |
 | **AI preference interpreter** | A member describes dates they enjoy in their own words. The model proposes tags from a fixed list and quotes the matching phrase. Tags stay drafts until the member confirms them and saves. |
 | **AI icebreakers** | Three editable opening lines drafted from the match's **public** prompts only. Picking one fills the composer; nothing is sent automatically. |
@@ -80,10 +81,29 @@ AI_API_KEY=<your key>
 3. In `.env`: `PAYPAL_MODE=sandbox`, `PAYPAL_CLIENT_ID=…`, `PAYPAL_CLIENT_SECRET=…`, `PAYPAL_MERCHANT_ID=…`. Restart `pnpm dev`.
 4. Optional webhooks need a public HTTPS URL (Render): add `https://<api-host>/api/v1/webhooks/paypal` in the app's webhook settings and set `PAYPAL_WEBHOOK_ID`.
 
+### Verify your keys (no money moves)
+
+```bash
+pnpm check:keys
+```
+
+This command checks three things:
+- PayPal accepts the Sandbox client ID and secret.
+- The merchant ID matches the payee PayPal returns on a test order. The order is created but never approved, so it simply expires.
+- The AI model answers one small request.
+
+It prints no secrets. On startup, the API also logs whether PayPal accepted the credentials.
+
 ## Deploy on Render (public judge URL)
 
 1. Render Dashboard → **New → Blueprint** → select this repository. `render.yaml` creates `baepal-db`, `baepal-api` and `baepal-web`.
-2. When prompted, set `APP_ORIGIN` to the web URL (for example `https://baepal-web.onrender.com`). Also set `FIELD_ENCRYPTION_KEY` (64 hex characters), the PayPal Sandbox values and the AI values.
+2. When prompted, fill in these values:
+   - `APP_ORIGIN` (on the API): the web URL, for example `https://baepal-web.onrender.com`.
+   - `API_ORIGIN` (on the web service): the API URL, for example `https://baepal-api.onrender.com`.
+   - `FIELD_ENCRYPTION_KEY`: 64 hex characters.
+   - The PayPal Sandbox values and the AI values.
+   
+   If Render assigns different URLs, update both origins and redeploy the web service.
 3. Open the web URL and use the demo sign-in buttons. Free instances sleep when idle, so the first request can take about a minute.
 
 ## Two-minute judge walkthrough

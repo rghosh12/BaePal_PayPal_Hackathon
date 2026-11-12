@@ -2125,3 +2125,8 @@ code {
   margin: 18px 0 8px;
   max-width: 420px;
 }
+
+.notification-list { list-style: none; padding: 0; margin: 0; }
+.notification-list li + li { border-top: 1px solid rgba(0, 0, 0, 0.08); }
+.notification-list a { display: flex; justify-content: space-between; gap: 1rem; padding: 0.9rem 1.1rem; color: inherit; text-decoration: none; }
+.notification-list li.unread strong::before { content: "● "; color: #c2410c; }

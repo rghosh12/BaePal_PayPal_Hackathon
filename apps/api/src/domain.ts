@@ -1,4 +1,5 @@
 import { persistMessageEvent } from "./chat-events.js";
+import { notify } from "./notifications.js";
 import { catalogueSnapshot } from "./response-contracts.js";
 import { randomUUID } from "node:crypto";
 import { db, one, tx, type Conn } from "./db.js";
@@ -157,12 +158,13 @@ export async function decide(
         "INSERT INTO matches(id,low_id,high_id) VALUES($1,LEAST($2::uuid,$3::uuid),GREATEST($2::uuid,$3::uuid)) ON CONFLICT(low_id,high_id) DO UPDATE SET low_id=EXCLUDED.low_id RETURNING id",
         [randomUUID(), user, target],
       );
-      const event = randomUUID();
-      for (const uid of [user, target])
-        await c.query(
-          "INSERT INTO notifications(id,user_id,event_id,category) VALUES($1,$2,$3,'match.created') ON CONFLICT DO NOTHING",
-          [randomUUID(), uid, event],
-        );
+      await notify(
+        c,
+        [user, target],
+        `match:${match.id}`,
+        "match.created",
+        match.id,
+      );
     }
     return { match };
   });
@@ -227,6 +229,13 @@ export async function sendMessage(
       [randomUUID(), id, sequence, user, client, text],
     );
     await persistMessageEvent(c, message);
+    await notify(
+      c,
+      [m.low_id === user ? m.high_id : m.low_id],
+      `message:${message.id}`,
+      "message.received",
+      id,
+    );
     return message;
   });
 }

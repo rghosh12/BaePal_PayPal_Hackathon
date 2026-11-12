@@ -36,6 +36,7 @@ import {
   Menu,
   Receipt,
   LoaderCircle,
+  Bell,
 } from "lucide-react";
 import { io, type Socket } from "socket.io-client";
 type Row = Record<string, any>;
@@ -69,7 +70,8 @@ export default function BaePal() {
       text: string;
       nonce: number;
     } | null>(null),
-    [tagDrafts, setTagDrafts] = useState<Row | null>(null);
+    [tagDrafts, setTagDrafts] = useState<Row | null>(null),
+    [updates, setUpdates] = useState<Row | null>(null);
   const csrf = useRef("");
   const configCache = useRef<Row | null>(null);
   const socket = useRef<Socket | null>(null);
@@ -173,12 +175,22 @@ export default function BaePal() {
       }
       const active = ["active", "paused"].includes(current.status);
       const m = active ? await api("/matches") : [];
+      const inbox =
+        active && !conf.hosted
+          ? await api("/notifications").catch(() => null)
+          : null;
       let fresh: any,
         hasData = false,
         datePlan = false;
       if (active) {
-        if (path === "/discover") {
+        if (path === "/notifications" && inbox) {
+          fresh = inbox;
+          hasData = true;
+        } else if (path === "/discover") {
           fresh = await api("/discover");
+          hasData = true;
+        } else if (path === "/likes" && !conf.hosted) {
+          fresh = await api("/likes");
           hasData = true;
         } else if (path === "/chats" || path === "/matches") {
           fresh = m;
@@ -213,6 +225,7 @@ export default function BaePal() {
       setConfig(conf);
       configCache.current = conf;
       setMatches(m);
+      setUpdates(inbox);
       if (hasData)
         setData((previous: any) => {
           if (!currentRequest()) return previous;
@@ -372,8 +385,42 @@ export default function BaePal() {
     { href: "/likes", label: "Likes", Icon: Heart },
     { href: "/chats", label: "Chats", Icon: MessageCircle },
     { href: "/dates", label: "Dates", Icon: CalendarDays },
+    ...(config.hosted
+      ? []
+      : [{ href: "/notifications", label: "Updates", Icon: Bell }]),
     { href: "/profile", label: "Profile", Icon: UserRound },
   ];
+  useEffect(() => {
+    if (path !== "/notifications" || !updates?.unread) return;
+    setUpdates((u) => (u ? { ...u, unread: 0 } : u));
+    void api("/notifications/read", "POST", {}).catch(() => undefined);
+  }, [path, updates?.unread, api]);
+  const returnHandled = useRef("");
+  useEffect(() => {
+    const pay = data?.payment;
+    if (!path.startsWith("/checkout/") || !pay || typeof window === "undefined")
+      return;
+    const query = new URLSearchParams(window.location.search);
+    if (returnHandled.current === pay.id) return;
+    if (query.get("cancelled") === "1") {
+      returnHandled.current = pay.id;
+      setNotice(
+        "You cancelled PayPal approval. No payment was taken; you can try again anytime.",
+      );
+    } else if (
+      query.get("approved") === "1" &&
+      pay.order_id &&
+      !["completed", "refunded"].includes(pay.state)
+    ) {
+      // Returning from PayPal is not payment evidence: the server captures and verifies.
+      returnHandled.current = pay.id;
+      void act(async () => {
+        setNotice("Approved in PayPal. Verifying and capturing on the server…");
+        await api(`/payments/${pay.id}/capture`, "POST", {});
+        go(`/payments/${pay.id}`);
+      });
+    }
+  }, [path, data?.payment?.id, data?.payment?.state]);
   const button = (
     text: string,
     fn: () => Promise<void>,
@@ -431,6 +478,23 @@ export default function BaePal() {
                 <p>Shared by both: {p.taste.commonGround.join(", ")}.</p>
               )}
             </div>
+          )}
+          {p.sharedInterests?.length > 0 && (
+            <p className="ai-reason">
+              <Sparkles size={15} aria-hidden />
+              <span>
+                <strong>Why you might click: </strong>you both enjoy{" "}
+                {p.sharedInterests.length === 1
+                  ? p.sharedInterests[0].toLowerCase()
+                  : `${p.sharedInterests
+                      .slice(0, -1)
+                      .map((i: string) => i.toLowerCase())
+                      .join(", ")} and ${p.sharedInterests
+                      .at(-1)
+                      .toLowerCase()}`}
+                .
+              </span>
+            </p>
           )}
           <div className="tag-list">
             {p.interests.map((i: string) => (
@@ -1523,6 +1587,108 @@ export default function BaePal() {
         )}
       </>
     );
+  } else if (path === "/notifications" && !config.hosted) {
+    const items: Row[] = Array.isArray(data?.items) ? data.items : [];
+    const target = (n: Row) =>
+      n.category === "message.received" || n.category === "match.created"
+        ? n.matchId && `/chats/${n.matchId}`
+        : n.category.startsWith("date.")
+          ? "/dates"
+          : "/payments";
+    content = (
+      <>
+        {heading(
+          "WHAT YOU MISSED",
+          "Updates.",
+          "Titles stay generic, so names, budgets and payment details only show inside the app.",
+        )}
+        {items.length ? (
+          <ul className="panel notification-list">
+            {items.map((n) => (
+              <li key={n.id} className={n.read ? "" : "unread"}>
+                <Link href={target(n) || "/chats"}>
+                  <strong>{n.title}</strong>
+                  <span className="muted">
+                    {new Date(n.createdAt).toLocaleString()}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="empty panel">
+            <Bell />
+            <h2>You're all caught up.</h2>
+            <p>New matches, messages, date plans and payments appear here.</p>
+          </div>
+        )}
+      </>
+    );
+  } else if (path === "/likes" && !config.hosted) {
+    const likes = Array.isArray(data) ? data : [];
+    const decideLike = (p: Row, action: "like" | "pass") =>
+      act(async () => {
+        const result = await api("/decisions", "POST", {
+          targetId: p.user_id,
+          action,
+          clientMutationId: crypto.randomUUID(),
+        });
+        setNotice(
+          action === "pass"
+            ? `Dismissed. ${p.display_name} won't be told.`
+            : result.match
+              ? `It's mutual! Your conversation with ${p.display_name} is ready in Chats.`
+              : "Like saved.",
+        );
+        await refresh();
+      });
+    content = (
+      <>
+        {heading(
+          "ROOM FOR A LITTLE MYSTERY",
+          "They're curious about you.",
+          "Like them back to open a conversation, or quietly dismiss. Nobody is notified of a dismissal.",
+        )}
+        {likes.length ? (
+          <div className="plans-grid">
+            {likes.map((p: Row) => (
+              <div key={p.user_id} className="form-stack">
+                <ProfileCard p={p} compact />
+                <div className="decision-bar">
+                  <button
+                    className="pass"
+                    aria-label={`Dismiss ${p.display_name}`}
+                    disabled={busy}
+                    onClick={() => void decideLike(p, "pass")}
+                  >
+                    <X size={20} />
+                    <span>Dismiss</span>
+                  </button>
+                  <button
+                    className="like"
+                    aria-label={`Like ${p.display_name} back`}
+                    disabled={busy}
+                    onClick={() => void decideLike(p, "like")}
+                  >
+                    <Heart size={20} />
+                    <span>Like back</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="empty panel">
+            <Heart />
+            <h2>No new likes yet.</h2>
+            <p>When someone likes you, they'll appear here first.</p>
+            <Link className="button" href="/discover">
+              Discover people
+            </Link>
+          </div>
+        )}
+      </>
+    );
   } else if (path === "/likes") {
     content = (
       <>
@@ -1814,29 +1980,6 @@ export default function BaePal() {
                         ? result.label
                         : "No shared option fits right now. Consider a free public walk or explicitly edit your preferences.",
                     );
-                  },
-                  "secondary",
-                )}
-              {p.suggestions?.length > 0 &&
-                button(
-                  "Try connected planner",
-                  async () => {
-                    if (
-                      !window.confirm(
-                        "Allow the configured planner to receive eligible public catalogue entries and their listed prices? Exact private budgets, messages and identity are excluded. The eligible price range may still imply preferences. No reservation or payment will be made.",
-                      )
-                    )
-                      return;
-                    const result = await api(
-                      `/date-plans/${p.id}/suggestions`,
-                      "POST",
-                      {
-                        useExternalProvider: true,
-                        allowExternalProcessing: true,
-                      },
-                    );
-                    setData({ ...p, suggestions: result.options });
-                    setNotice(result.label);
                   },
                   "secondary",
                 )}
@@ -2403,6 +2546,14 @@ export default function BaePal() {
                   {label}
                   {label === "Chats" && matches.length > 0 && (
                     <span className="nav-count">{matches.length}</span>
+                  )}
+                  {label === "Updates" && updates?.unread > 0 && (
+                    <span
+                      className="nav-count"
+                      aria-label={`${updates?.unread} unread`}
+                    >
+                      {updates?.unread}
+                    </span>
                   )}
                 </Link>
               ))}

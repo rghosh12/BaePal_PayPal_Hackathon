@@ -30,6 +30,13 @@ const schema = z.object({
   AI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(15000),
   // Explicit opt-in for a public *Sandbox-only* hackathon deployment (e.g. Render).
   HACKATHON_SANDBOX_DEPLOY: z.enum(["true", "false"]).default("false"),
+  // Fastify trustProxy: "true"/"false", a hop count, or proxy-addr names/CIDRs.
+  TRUST_PROXY: z
+    .string()
+    .default("loopback")
+    .transform((v) =>
+      v === "true" ? true : v === "false" ? false : /^\d+$/.test(v) ? Number(v) : v,
+    ),
   NODE_ENV: z.string().default("development"),
 });
 export const config = schema.parse(process.env);

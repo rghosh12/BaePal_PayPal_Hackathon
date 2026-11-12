@@ -8,6 +8,7 @@ import {
   verifiedRefund,
 } from "./providers/paypal.js";
 import { fail, planFor } from "./domain.js";
+import { matchMembers, notify } from "./notifications.js";
 export async function ownPayment(user: string, id: string) {
   const p = await one(
     db,
@@ -102,7 +103,7 @@ export async function recordOrder(id: string, order: any) {
   return tx(async (c) => {
     const pay = await one(
       c,
-      "SELECT p.*,u.id AS purchase_uuid,u.amount_cents,u.plan_id,u.version,u.snapshot FROM payments p JOIN purchases u ON u.id=p.purchase_id WHERE p.id=$1 FOR UPDATE OF p",
+      "SELECT p.*,u.id AS purchase_uuid,u.amount_cents,u.plan_id,u.version,u.snapshot,u.buyer_id FROM payments p JOIN purchases u ON u.id=p.purchase_id WHERE p.id=$1 FOR UPDATE OF p",
       [id],
     );
     if (!pay) return;
@@ -132,6 +133,13 @@ export async function recordOrder(id: string, order: any) {
       c,
       "SELECT * FROM date_plans WHERE id=$1 FOR UPDATE",
       [pay.plan_id],
+    );
+    await notify(
+      c,
+      [pay.buyer_id],
+      `capture:${evidence.id}`,
+      "payment.completed",
+      plan.match_id,
     );
     // Provider completion can arrive after consent expires, before the expiry
     // worker runs. Check again under the plan lock before confirming either payer.
@@ -166,6 +174,14 @@ export async function recordOrder(id: string, order: any) {
           count.n === 2 ? "paid" : "partially_paid",
         ],
       );
+      if (count.n === 2)
+        await notify(
+          c,
+          await matchMembers(c, plan.match_id),
+          `confirmed:${plan.id}:${plan.version}`,
+          "date.confirmed",
+          plan.match_id,
+        );
     }
   });
 }
@@ -242,6 +258,19 @@ async function refundPayment(pay: any) {
         "INSERT INTO financial_events(id,payment_id,type,source_id) VALUES($1,$2,'refund.completed',$3) ON CONFLICT DO NOTHING",
         [randomUUID(), pay.id, result.id],
       );
+      const owner = await one(
+        c,
+        "SELECT u.buyer_id,d.match_id FROM purchases u JOIN date_plans d ON d.id=u.plan_id WHERE u.id=$1",
+        [pay.purchase_id],
+      );
+      if (owner)
+        await notify(
+          c,
+          [owner.buyer_id],
+          `refund:${result.id}`,
+          "refund.completed",
+          owner.match_id,
+        );
     }
   });
 }

@@ -24,12 +24,10 @@ const money = (amount: number) => {
 };
 export class SandboxPayPal implements PaymentProvider {
   private base = "https://api-m.sandbox.paypal.com";
-  private async request(
-    path: string,
-    method = "GET",
-    body?: unknown,
-    key?: string,
-  ) {
+  private token: { value: string; expiresAt: number } | null = null;
+  async accessToken() {
+    if (this.token && this.token.expiresAt > Date.now() + 60_000)
+      return this.token.value;
     const auth = await fetch(`${this.base}/v1/oauth2/token`, {
       method: "POST",
       headers: {
@@ -39,19 +37,55 @@ export class SandboxPayPal implements PaymentProvider {
       body: "grant_type=client_credentials",
       signal: AbortSignal.timeout(12000),
     });
-    if (!auth.ok) throw Error("PayPal authentication unavailable");
-    const { access_token } = (await auth.json()) as any;
+    if (!auth.ok) {
+      console.error(
+        JSON.stringify({ paypal: { op: "oauth", status: auth.status } }),
+      );
+      throw Error("PayPal authentication unavailable");
+    }
+    const { access_token, expires_in } = (await auth.json()) as any;
+    this.token = {
+      value: access_token,
+      expiresAt: Date.now() + Number(expires_in || 300) * 1000,
+    };
+    return access_token as string;
+  }
+  private async request(
+    path: string,
+    method = "GET",
+    body?: unknown,
+    key?: string,
+  ) {
+    const access_token = await this.accessToken();
     const r = await fetch(this.base + path, {
       method,
       headers: {
         Authorization: `Bearer ${access_token}`,
         "Content-Type": "application/json",
+        // Capture verification needs payee/custom_id, absent from minimal responses.
+        Prefer: "return=representation",
         ...(key ? { "PayPal-Request-Id": key } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(15000),
     });
-    if (!r.ok) throw Error("PayPal operation requires reconciliation");
+    if (!r.ok) {
+      if (r.status === 401) this.token = null;
+      // Log only PayPal's error name/issue and debug_id, never payloads or secrets.
+      const err = (await r.json().catch(() => ({}))) as any;
+      console.error(
+        JSON.stringify({
+          paypal: {
+            op: `${method} ${path.replace(/\/[A-Z0-9-]{10,}/g, "/:id")}`,
+            status: r.status,
+            name: err?.name,
+            issue: err?.details?.[0]?.issue,
+            debugId: err?.debug_id,
+          },
+        }),
+      );
+      throw Error("PayPal operation requires reconciliation");
+    }
     return r.json() as Promise<any>;
   }
   createOrder(amount: number, purchaseId: string, key: string) {

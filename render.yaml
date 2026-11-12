@@ -35,6 +35,8 @@ services:
         sync: false # 64 hex chars: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
       - key: DEMO_MODE
         value: "true"
+      - key: TRUST_PROXY
+        value: "true" # behind Render's proxy and the web proxy
       - key: PAYPAL_MODE
         value: sandbox
       - key: PAYPAL_CLIENT_ID
@@ -59,12 +61,12 @@ services:
     runtime: node
     plan: free
     buildCommand: npm install -g pnpm@11.25.0 && pnpm install --frozen-lockfile && pnpm --filter @baepal/web build
-    startCommand: pnpm --filter @baepal/web start
+    startCommand: cd apps/web && npx next start --hostname 0.0.0.0 --port $PORT
     envVars:
       - key: NODE_VERSION
         value: "24"
+      # Public API URL, e.g. https://baepal-api.onrender.com (free services
+      # cannot receive private-network traffic). Needed at build time: redeploy
+      # the web service after changing it.
       - key: API_ORIGIN
-        fromService:
-          type: web
-          name: baepal-api
-          property: hostport # private network host:port; next.config adds http://
+        sync: false
