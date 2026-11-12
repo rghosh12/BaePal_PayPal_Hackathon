@@ -1,4 +1,9 @@
 import type { NextConfig } from "next";
+// Render's private-network `hostport` has no scheme; accept both forms.
+const rawApi = process.env.API_ORIGIN || "http://127.0.0.1:4000";
+process.env.API_ORIGIN = /^https?:\/\//.test(rawApi)
+  ? rawApi
+  : `http://${rawApi}`;
 const config: NextConfig = {
   poweredByHeader: false,
   async rewrites() {

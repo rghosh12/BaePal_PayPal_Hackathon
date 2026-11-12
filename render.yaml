@@ -1,0 +1,70 @@
+# Render Blueprint: public Sandbox-only judge demo (no live payments).
+# Render Dashboard → New → Blueprint → select this repo. You will be prompted
+# for every `sync: false` value; secrets are never committed.
+databases:
+  - name: baepal-db
+    plan: free
+    databaseName: baepal
+    user: baepal
+
+services:
+  - type: web
+    name: baepal-api
+    runtime: node
+    plan: free
+    buildCommand: npm install -g pnpm@11.25.0 && pnpm install --frozen-lockfile && pnpm --filter @baepal/api build
+    # Migrations are additive and idempotent; seed only inserts missing fictional demo rows.
+    # (Run at start because free instances do not support pre-deploy commands.)
+    startCommand: pnpm db:migrate && pnpm db:seed && pnpm --filter @baepal/api start
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      # NODE_ENV is intentionally left unset so pnpm installs the build tooling.
+      - key: HACKATHON_SANDBOX_DEPLOY
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: baepal-db
+          property: connectionString
+      - key: APP_ORIGIN
+        sync: false # e.g. https://baepal-web.onrender.com (exact public web URL, no trailing slash)
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: FIELD_ENCRYPTION_KEY
+        sync: false # 64 hex chars: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+      - key: DEMO_MODE
+        value: "true"
+      - key: PAYPAL_MODE
+        value: sandbox
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_MERCHANT_ID
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false # optional; webhooks are rejected until set
+      - key: AI_MODE
+        value: openai
+      - key: AI_BASE_URL
+        sync: false # e.g. https://api.openai.com/v1 or https://generativelanguage.googleapis.com/v1beta/openai
+      - key: AI_MODEL
+        sync: false # e.g. gpt-4o-mini or gemini-2.5-flash
+      - key: AI_API_KEY
+        sync: false
+
+  - type: web
+    name: baepal-web
+    runtime: node
+    plan: free
+    buildCommand: npm install -g pnpm@11.25.0 && pnpm install --frozen-lockfile && pnpm --filter @baepal/web build
+    startCommand: pnpm --filter @baepal/web start
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: API_ORIGIN
+        fromService:
+          type: web
+          name: baepal-api
+          property: hostport # private network host:port; next.config adds http://

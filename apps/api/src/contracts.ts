@@ -21,9 +21,9 @@ export const Contracts = {
     .object({
       budgetCents: z.number().int().min(0).max(100000),
       activities: z
-        .array(z.enum(["Coffee", "Art", "Hiking"]))
+        .array(z.enum(["Coffee", "Art", "Hiking", "Books", "Music", "Food"]))
         .min(1)
-        .max(3),
+        .max(6),
       timeStart: z.iso.datetime(),
       timeEnd: z.iso.datetime(),
     })

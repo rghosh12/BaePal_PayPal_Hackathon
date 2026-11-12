@@ -11,6 +11,7 @@ import IntegrationWorkspace from "./IntegrationWorkspace";
 import TasteWorkspace from "./TasteWorkspace";
 import MatchWhy from "./MatchWhy";
 import ChatThread from "./ChatThread";
+import PayPalCheckout from "./PayPalCheckout";
 import { activateChatActor, chatScope, revokeChat } from "./chat-state";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -62,7 +63,13 @@ export default function BaePal() {
     [menu, setMenu] = useState(false),
     [chatRefresh, setChatRefresh] = useState(0),
     [chatUnavailable, setChatUnavailable] = useState(""),
-    [chatTransport, setChatTransport] = useState("connecting");
+    [chatTransport, setChatTransport] = useState("connecting"),
+    [icebreakers, setIcebreakers] = useState<Row | null>(null),
+    [pickedDraft, setPickedDraft] = useState<{
+      text: string;
+      nonce: number;
+    } | null>(null),
+    [tagDrafts, setTagDrafts] = useState<Row | null>(null);
   const csrf = useRef("");
   const configCache = useRef<Row | null>(null);
   const socket = useRef<Socket | null>(null);
@@ -215,7 +222,10 @@ export default function BaePal() {
                 ...(previous?.id === fresh.id &&
                 previous.version === fresh.version &&
                 previous.suggestions
-                  ? { suggestions: previous.suggestions }
+                  ? {
+                      suggestions: previous.suggestions,
+                      suggestionSource: previous.suggestionSource,
+                    }
                   : {}),
               }
             : fresh;
@@ -481,7 +491,7 @@ export default function BaePal() {
         <fieldset>
           <legend>Activities you’d enjoy</legend>
           <div className="check-row">
-            {["Coffee", "Art", "Hiking"].map((a) => (
+            {["Coffee", "Art", "Hiking", "Books", "Music", "Food"].map((a) => (
               <label key={a}>
                 <input
                   type="checkbox"
@@ -1175,6 +1185,100 @@ export default function BaePal() {
             Your interests · comma separated
             <input name="interests" defaultValue={p.interests.join(", ")} />
           </label>
+          <div className="note-card ai-tags">
+            <div className="section-label">
+              <Sparkles size={18} />
+              <h3>Describe dates you enjoy — AI suggests tags</h3>
+            </div>
+            <textarea
+              id="ai-pref-text"
+              aria-label="Describe dates you enjoy, in your own words"
+              maxLength={500}
+              placeholder="e.g. I love slow coffee mornings, small live shows and getting my hands messy at a pottery class. I like to plan ahead."
+            />
+            <small className="muted">
+              Only this text is sent to the configured AI model. Don’t include
+              financial or account details. Tags stay drafts until you add them
+              and save.
+            </small>
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() =>
+                void act(async () => {
+                  const text = (
+                    document.getElementById("ai-pref-text") as HTMLTextAreaElement
+                  ).value.trim();
+                  if (text.length < 3)
+                    throw Error("Write a sentence about dates you enjoy first.");
+                  const result = await api("/me/preference-tag-drafts", "POST", {
+                    text,
+                    allowExternalProcessing: true,
+                  });
+                  setTagDrafts({
+                    ...result,
+                    selected: result.tags.map((t: Row) => t.tag),
+                  });
+                })
+              }
+            >
+              Suggest tags
+            </button>
+            {tagDrafts && (
+              <fieldset aria-live="polite">
+                <legend>
+                  {tagDrafts.source === "model" ? "AI-proposed tags" : "Keyword-matched tags"}{" "}
+                  · confirm the ones that are really you
+                </legend>
+                {!tagDrafts.tags.length && <p>No tags found. Try more detail.</p>}
+                <div className="check-row">
+                  {tagDrafts.tags.map((t: Row) => (
+                    <label key={t.tag} title={t.evidence ? `From: “${t.evidence}”` : ""}>
+                      <input
+                        type="checkbox"
+                        checked={tagDrafts.selected.includes(t.tag)}
+                        onChange={(e) =>
+                          setTagDrafts({
+                            ...tagDrafts,
+                            selected: e.target.checked
+                              ? [...tagDrafts.selected, t.tag]
+                              : tagDrafts.selected.filter((x: string) => x !== t.tag),
+                          })
+                        }
+                      />
+                      {t.tag}
+                      {t.evidence && <small className="muted"> “{t.evidence}”</small>}
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={!tagDrafts.selected.length}
+                  onClick={() => {
+                    const input = document.querySelector(
+                      'input[name="interests"]',
+                    ) as HTMLInputElement;
+                    const current = input.value
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean);
+                    input.value = [...new Set([...current, ...tagDrafts.selected])]
+                      .slice(0, 10)
+                      .join(", ");
+                    setTagDrafts(null);
+                    setNotice(
+                      "Tags added to your interests. Save your profile to apply them to matching.",
+                    );
+                  }}
+                >
+                  Add confirmed tags to my interests
+                </button>
+                <small className="muted">{tagDrafts.label}</small>
+              </fieldset>
+            )}
+          </div>
           <label>
             My perfect first date
             <textarea
@@ -1500,8 +1604,49 @@ export default function BaePal() {
             unavailable={chatClosed}
             transport={chatTransport}
             onUnavailable={onChatUnavailable}
+            suggestedDraft={pickedDraft}
           />
           <aside className="form-stack">
+            {!chatClosed && (
+              <div className="note-card">
+                <Sparkles size={22} />
+                <h3>Not sure how to start?</h3>
+                <p className="muted">
+                  AI drafts openers from their public prompts only. You edit
+                  and send — nothing goes out automatically.
+                </p>
+                {button(
+                  icebreakers?.mid === mid ? "Draft new openers" : "Draft openers with AI",
+                  async () => {
+                    const result = await api(
+                      `/conversations/${mid}/icebreakers`,
+                      "POST",
+                      {},
+                    );
+                    setIcebreakers({ mid, ...result });
+                  },
+                  "secondary",
+                )}
+                {icebreakers?.mid === mid && (
+                  <div className="form-stack" aria-live="polite">
+                    <small className="pill">
+                      {icebreakers.source === "model" ? "AI MODEL" : "TEMPLATE FALLBACK"}
+                    </small>
+                    {icebreakers.drafts.map((d: string, i: number) => (
+                      <button
+                        type="button"
+                        className="secondary draft-choice"
+                        key={i}
+                        onClick={() => setPickedDraft({ text: d, nonce: Date.now() })}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                    <small className="muted">{icebreakers.label}</small>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="note-card lavender">
               <CalendarDays size={24} />
               <h2>Take it off the chat.</h2>
@@ -1659,7 +1804,11 @@ export default function BaePal() {
                       "POST",
                       {},
                     );
-                    setData({ ...p, suggestions: result.options });
+                    setData({
+                      ...p,
+                      suggestions: result.options,
+                      suggestionSource: result.source,
+                    });
                     setNotice(
                       result.options.length
                         ? result.label
@@ -1705,6 +1854,19 @@ export default function BaePal() {
                   <div>
                     <h3>{x.title}</h3>
                     <p>{x.description}</p>
+                    {x.reason && (
+                      <p className="ai-reason">
+                        <Sparkles size={15} aria-hidden />{" "}
+                        <span>
+                          <strong>
+                            {p.suggestionSource === "model"
+                              ? "AI planner: "
+                              : "Why: "}
+                          </strong>
+                          {x.reason}
+                        </span>
+                      </p>
+                    )}
                     <p>
                       <strong>{dollars(x.price_cents)} per person</strong> ·{" "}
                       {x.duration_minutes} minutes
@@ -1845,12 +2007,27 @@ export default function BaePal() {
             </div>
           </dl>
           <p>{p.snapshot.policy}</p>
+          {config.paymentMode === "sandbox" &&
+            config.paypalClientId &&
+            !["completed", "refunded", "pending", "capture_pending"].includes(
+              pay.state,
+            ) && (
+              <PayPalCheckout
+                clientId={config.paypalClientId}
+                paymentId={pay.id}
+                api={api}
+                onCaptured={() => go(`/payments/${pay.id}`)}
+                onMessage={(text, isError) =>
+                  isError ? setError(text) : setNotice(text)
+                }
+              />
+            )}
           {!["completed", "refunded"].includes(pay.state) && (
             <>
               {button(
                 config.paymentMode === "mock"
                   ? "Create mock order"
-                  : "Continue to PayPal Sandbox",
+                  : "Or continue to PayPal Sandbox (redirect)",
                 async () => {
                   const result = await api("/payments/orders", "POST", {
                     paymentId: pay.id,

@@ -26,6 +26,7 @@ export default function ChatThread({
   unavailable,
   transport,
   onUnavailable,
+  suggestedDraft,
 }: {
   actorId: string;
   conversationId: string;
@@ -34,6 +35,8 @@ export default function ChatThread({
   unavailable: boolean;
   transport: string;
   onUnavailable: (status: number, scope: string) => void;
+  /** An AI/template draft the member chose to edit. Never auto-sent. */
+  suggestedDraft?: { text: string; nonce: number } | null;
 }) {
   const scope = chatScope(actorId, conversationId);
   const entry = useRef(chatDraft(scope)).current;
@@ -76,6 +79,11 @@ export default function ChatThread({
     },
     [scope, onUnavailable],
   );
+  useEffect(() => {
+    if (!suggestedDraft || entry.revoked) return;
+    entry.draft = suggestedDraft.text;
+    setDraft(suggestedDraft.text);
+  }, [suggestedDraft, entry]);
   const load = useCallback(async () => {
     if (!alive.current || entry.revoked || !connection.current) return;
     if (fetching.current) {

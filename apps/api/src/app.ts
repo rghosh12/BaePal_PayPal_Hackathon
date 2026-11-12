@@ -41,7 +41,14 @@ import {
 } from "./domain.js";
 import { createOrder, captureOrder, ownPayment } from "./payments.js";
 import { provider } from "./providers/paypal.js";
-import { DeterministicPlanner } from "./providers/ai.js";
+import {
+  aiDescriptor,
+  aiEvidence,
+  draftIcebreakers,
+  interpretPreferences,
+  planDates,
+  TAG_TAXONOMY,
+} from "./providers/llm.js";
 import { Contracts, openapi } from "./contracts.js";
 const id = z.string().uuid();
 const body = (r: FastifyRequest, s: z.ZodType<any>) => s.parse(r.body);
@@ -139,8 +146,10 @@ export async function buildApp() {
       if (r.headers.origin !== config.APP_ORIGIN)
         return fail(403, "ORIGIN_DENIED", "Request origin is not allowed.");
       if (r.cookies.baepal) {
-        const s = await session(r);
-        if (!equal(String(r.headers["x-csrf-token"] || ""), s.csrf))
+        // A stale/revoked cookie must not block login; protected routes still
+        // authenticate themselves and reject the request.
+        const s = await session(r).catch(() => null);
+        if (s && !equal(String(r.headers["x-csrf-token"] || ""), s.csrf))
           return fail(403, "CSRF_REQUIRED", "Refresh the page and try again.");
       }
     }
@@ -202,7 +211,8 @@ export async function buildApp() {
       paypalClientId:
         config.PAYPAL_MODE === "sandbox" ? config.PAYPAL_CLIENT_ID : null,
       emailMode: "local",
-      aiMode: "deterministic",
+      aiMode: aiDescriptor().mode,
+      ai: aiDescriptor(),
       connections: { linkedin: "unavailable", github: "unavailable" },
     }),
   );
@@ -705,6 +715,64 @@ export async function buildApp() {
     );
     return ok(cards);
   });
+  // ---- AI assistance: drafts only, never autonomous actions ----
+  app.post(
+    "/api/v1/conversations/:id/icebreakers",
+    { config: { rateLimit: { max: 10, timeWindow: "10 minutes" } } },
+    async (r) => {
+      const s = await member(r);
+      const m = await activeMatch(db, param(r), s.user_id);
+      const partnerId = m.low_id === s.user_id ? m.high_id : m.low_id;
+      const [own, partner] = await Promise.all([
+        publicProfile(db, s.user_id),
+        publicProfile(db, partnerId),
+      ]);
+      const result = await draftIcebreakers({
+        partnerName: partner.display_name,
+        partnerInterests: partner.interests || [],
+        partnerPrompts: partner.prompts || [],
+        sharedInterests: (own.interests || []).filter((i: string) =>
+          (partner.interests || []).includes(i),
+        ),
+      });
+      return ok({
+        drafts: result.drafts,
+        source: result.source,
+        label:
+          result.source === "model"
+            ? `Drafted by ${aiDescriptor().model} from public prompts only. Edit before sending — nothing is sent automatically.`
+            : "Template drafts (no AI model ran). Edit before sending.",
+      });
+    },
+  );
+  app.post(
+    "/api/v1/me/preference-tag-drafts",
+    { config: { rateLimit: { max: 10, timeWindow: "10 minutes" } } },
+    async (r) => {
+      await session(r);
+      const b = z
+        .object({
+          text: z.string().min(3).max(500),
+          allowExternalProcessing: z.literal(true),
+        })
+        .strict()
+        .parse(r.body);
+      const result = await interpretPreferences(b.text);
+      return ok({
+        tags: result.tags,
+        source: result.source,
+        taxonomy: TAG_TAXONOMY,
+        label:
+          result.source === "model"
+            ? `Draft tags proposed by ${aiDescriptor().model}. Nothing changes until you confirm and save.`
+            : "Keyword-matched draft tags (no AI model ran). Nothing changes until you confirm and save.",
+      });
+    },
+  );
+  app.get("/api/v1/ai/evidence", async (r) => {
+    await member(r);
+    return ok({ config: aiDescriptor(), runs: aiEvidence() });
+  });
   app.get("/api/v1/people/:id", async (r) => {
     const s = await member(r);
     const target = param(r);
@@ -969,19 +1037,33 @@ export async function buildApp() {
             "Only eligible public catalogue entries were shared; no exact private budgets or messages.",
         });
       }
-      const ranked = await new DeterministicPlanner().suggestDates({
-        publicInterests: [],
+      // Only public declared interests shared by both members reach the planner.
+      const pair = await one(
+        db,
+        "SELECT a.interests AS a, b.interests AS b FROM matches m JOIN profiles a ON a.user_id=m.low_id JOIN profiles b ON b.user_id=m.high_id WHERE m.id=$1",
+        [p.match_id],
+      );
+      const sharedInterests: string[] = (pair?.a || []).filter((i: string) =>
+        (pair?.b || []).includes(i),
+      );
+      const planned = await planDates({
+        sharedInterests,
         eligibleOptions: available,
       });
+      const ai = aiDescriptor();
       return ok({
-        options: ranked.map((s) => ({
+        options: planned.ranked.map((s) => ({
           ...available.find((x) => x.id === s.id),
           reason: s.reason,
         })),
+        source: planned.source,
+        model: planned.source === "model" ? ai.model : null,
         label:
-          "Suggested using your preferences. Fictional demo catalogue; no real reservation.",
+          planned.source === "model"
+            ? `Ranked by ${ai.model} (${ai.provider}) from options that already fit both private budgets and times. Fictional demo catalogue; no real reservation.`
+            : "Suggested using your preferences (deterministic fallback — no AI model ran). Fictional demo catalogue; no real reservation.",
         privacy:
-          "Exact budgets are private. Suggested prices can still allow indirect inference.",
+          "Exact budgets are private and never sent to the AI. Suggested prices can still allow indirect inference.",
       });
     },
   );

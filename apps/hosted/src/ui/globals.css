@@ -2087,3 +2087,41 @@ code {
 .taste-table label {
   position: relative;
 }
+
+/* AI assistance + PayPal checkout */
+.ai-reason {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  background: var(--lavender, #e9e2f2);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.ai-reason svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--rose, #b44d64);
+}
+.ai-tags {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ai-tags textarea {
+  min-height: 90px;
+}
+.draft-choice {
+  text-align: left;
+  white-space: normal;
+  line-height: 1.4;
+  height: auto;
+  min-height: 44px;
+  padding: 10px 14px;
+  font-weight: 500;
+}
+.paypal-checkout {
+  margin: 18px 0 8px;
+  max-width: 420px;
+}

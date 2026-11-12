@@ -105,6 +105,8 @@ export class SandboxPayPal implements PaymentProvider {
     return this.request(`/v2/payments/refunds/${encodeURIComponent(id)}`);
   }
   async verifyWebhook(headers: Record<string, unknown>, event: unknown) {
+    // Without a configured webhook ID nothing can be verified: fail closed.
+    if (!config.PAYPAL_WEBHOOK_ID) return false;
     const result = await this.request(
       "/v1/notifications/verify-webhook-signature",
       "POST",

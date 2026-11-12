@@ -54,17 +54,79 @@ await tx(async (c) => {
         id,
         names[i],
         bios[i % 4],
-        ["Coffee", "Art", i % 2 ? "Hiking" : "Books"],
-        JSON.stringify([
-          {
-            question: "My perfect first date",
-            answer: "A little art, a long walk, and no rush.",
-          },
-          {
-            question: "Together we could",
-            answer: "Find the best hidden bookstore in Seattle.",
-          },
-        ]),
+        [
+          ["Coffee", "Art", "Books", "Museums"],
+          ["Coffee", "Art", "Hiking", "Live music"],
+          ["Hiking", "Kayaking", "Picnics", "Photography"],
+          ["Books", "Board games", "Coffee", "Film"],
+          ["Live music", "Food trucks", "Dancing", "Comedy"],
+          ["Pottery", "Art", "Farmers markets", "Cooking"],
+        ][i % 6],
+        JSON.stringify(
+          [
+            [
+              {
+                question: "My perfect first date",
+                answer: "A little art, a long walk, and no rush.",
+              },
+              {
+                question: "Together we could",
+                answer: "Find the best hidden bookstore in Seattle.",
+              },
+            ],
+            [
+              {
+                question: "My perfect first date",
+                answer:
+                  "Coffee somewhere with big windows, then a gallery we've never been to.",
+              },
+              {
+                question: "Together we could",
+                answer: "Catch a tiny acoustic show and argue about the setlist.",
+              },
+            ],
+            [
+              {
+                question: "My perfect first date",
+                answer: "A sunrise trail, a thermos, and good snacks.",
+              },
+              {
+                question: "Together we could",
+                answer: "Kayak Lake Union and photograph the houseboats.",
+              },
+            ],
+            [
+              {
+                question: "My perfect first date",
+                answer: "A board game café where I will absolutely lose at Catan.",
+              },
+              {
+                question: "Together we could",
+                answer: "Start a two-person book club with very strong opinions.",
+              },
+            ],
+            [
+              {
+                question: "My perfect first date",
+                answer: "Food trucks, a comedy set, and dancing badly after.",
+              },
+              {
+                question: "Together we could",
+                answer: "Try every taco truck in Fremont.",
+              },
+            ],
+            [
+              {
+                question: "My perfect first date",
+                answer: "Getting our hands messy at a pottery wheel.",
+              },
+              {
+                question: "Together we could",
+                answer: "Cook dinner from whatever the farmers market has.",
+              },
+            ],
+          ][i % 6],
+        ),
         [`/portraits/${i % 6}.svg`, `/portraits/${(i + 1) % 6}.svg`],
       ],
     );
@@ -98,6 +160,56 @@ await tx(async (c) => {
       address: "Public waterfront · Seattle",
       price: 0,
       duration: 60,
+    },
+    {
+      id: "bookshop",
+      title: "Bookshop & coffee session",
+      activity: "Books",
+      description:
+        "A fictional hour browsing a demo bookshop, each picking a book for the other, plus a drink.",
+      address: "Demo venue · Fremont, Seattle",
+      price: 2000,
+      duration: 75,
+    },
+    {
+      id: "pottery",
+      title: "Beginner pottery evening",
+      activity: "Art",
+      description:
+        "A fictional hands-on wheel session for two beginners. Pieces are not fired or shipped.",
+      address: "Demo studio · Ballard, Seattle",
+      price: 3500,
+      duration: 120,
+    },
+    {
+      id: "acoustic",
+      title: "Small-room acoustic set",
+      activity: "Music",
+      description:
+        "A fictional intimate acoustic performance with reserved seats for two.",
+      address: "Demo venue · Capitol Hill, Seattle",
+      price: 2500,
+      duration: 90,
+    },
+    {
+      id: "picnic",
+      title: "Community picnic in the park",
+      activity: "Food",
+      description:
+        "A free public picnic idea. Bring your own snacks; no booking or ticket is supplied.",
+      address: "Public park · Gas Works, Seattle",
+      price: 0,
+      duration: 90,
+    },
+    {
+      id: "foodtrucks",
+      title: "Food truck tasting crawl",
+      activity: "Food",
+      description:
+        "A fictional tasting pass for four demo food trucks, shared between two people.",
+      address: "Demo market · South Lake Union, Seattle",
+      price: 1800,
+      duration: 90,
     },
   ])
     await c.query(

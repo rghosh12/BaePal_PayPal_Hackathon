@@ -2,6 +2,8 @@
 
 A good connection deserves a good first date. BaePal is a Seattle-focused, mobile-first dating prototype with mutual matches, persisted chat, private budget coordination, versioned date consent, and independent demo ticket purchases.
 
+**Judges: start with [docs/HACKATHON.md](docs/HACKATHON.md)**. It covers the features, how PayPal (Orders v2, JS SDK Buttons, refunds, webhooks) and AI (preference interpreter, icebreakers, budget-safe date planner) are used, the 5-minute local setup, the Render one-click deploy (`render.yaml`), and a 2-minute walkthrough.
+
 **Deployed private prototype:** https://baepal-prototype.ruppakriki.chatgpt.site
 
 Open it with your ChatGPT account, choose Alex or Jordan, and use the **Demo persona** selector to test both sides. The core flow persists through reloads. Hosted tickets/refunds are explicitly mock; no real booking, PayPal call, or public member network is implied. [Try it and improve the framework](docs/PROTOTYPE.md).
@@ -79,7 +81,7 @@ Run browser tests against a **freshly seeded, disposable** development database.
 - `apps/api`: Fastify, PostgreSQL via parameterized `pg`, Argon2id, Zod, AES-256-GCM field encryption, Socket.IO, image re-encoding with Sharp.
 - `db/migrations`: additive SQL migrations, explicit constraints and indexes; no automatic production schema push.
 - `apps/api/src/contracts.ts`: shared runtime request schemas and generated partial OpenAPI at `/api/v1/openapi.json`.
-- `apps/api/src/providers`: PayPal and deterministic planner interfaces/adapters. No AI model is claimed to run.
+- `apps/api/src/providers`: PayPal Sandbox/mock adapters and the hosted-LLM adapter (`llm.ts`, any OpenAI-compatible API) with schema validation and a labeled deterministic fallback. A model runs only when `AI_MODE=openai` and `AI_API_KEY` are configured; `GET /api/v1/ai/evidence` shows redacted execution records.
 - `infra/local`: local PostgreSQL; `.github/workflows/ci.yml`: frozen install, checks, DB tests, builds and browser smoke tests.
 
 The web server proxies `/api` and `/socket.io` to `API_ORIGIN`. Private screen data is requested with no-store fetches; the API rechecks session/resource ownership. Build and run the API as a persistent process for sockets and workers. See [architecture and permission map](docs/ARCHITECTURE.md), [API inventory](docs/API.md), and [dependency choices](docs/DEPENDENCIES.md).
