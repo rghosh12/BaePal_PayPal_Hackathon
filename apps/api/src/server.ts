@@ -2,14 +2,25 @@ import { buildApp } from "./app.js";
 import { config } from "./config.js";
 import { workerTick } from "./payments.js";
 import { db } from "./db.js";
+import { deliverEmails, purgeExpired } from "./ops.js";
 import { provider, SandboxPayPal } from "./providers/paypal.js";
 import { aiDescriptor } from "./providers/llm.js";
 const { app } = await buildApp();
 await app.listen({ host: "0.0.0.0", port: config.PORT });
+let lastPurge = 0;
 const timer = setInterval(() => {
   void workerTick().catch(() =>
     console.error("Worker tick failed; durable jobs remain queued."),
   );
+  void deliverEmails().catch(() =>
+    console.error("Email delivery failed; emails remain queued."),
+  );
+  if (Date.now() - lastPurge > 3600000) {
+    lastPurge = Date.now();
+    void purgeExpired()
+      .then((r) => console.log(JSON.stringify({ retention: r })))
+      .catch(() => console.error("Retention purge failed; will retry."));
+  }
 }, 5000);
 timer.unref();
 console.log(

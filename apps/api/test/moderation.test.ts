@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+import argon2 from "argon2";
 import { buildApp } from "../src/app.js";
 import { db, one } from "../src/db.js";
 import { hash } from "../src/crypto.js";
@@ -24,14 +25,23 @@ function request(user: number, method: string, path: string, payload?: object) {
     payload,
   });
 }
-const moderate = (action: string, expectedVersion: number, user = MOD) =>
+const STEP_UP = "Synthetic-Step-Up-2026";
+let stepUpHash = "";
+const moderate = (
+  action: string,
+  expectedVersion: number,
+  user = MOD,
+  password: string | undefined = STEP_UP,
+) =>
   request(user, "PATCH", `/admin/reports/${reportId}`, {
     action,
     reason: "Synthetic moderation reason",
     expectedVersion,
+    ...(password ? { password } : {}),
   });
 beforeAll(async () => {
   await migrate();
+  stepUpHash = await argon2.hash(STEP_UP);
 });
 beforeEach(async () => {
   await db.query("TRUNCATE users,catalogue CASCADE");
@@ -40,8 +50,8 @@ beforeEach(async () => {
     const user = { id: randomUUID(), token: randomUUID(), csrf: randomUUID() };
     users.push(user);
     await db.query(
-      "INSERT INTO users(id,email,password_hash,status,role) VALUES($1,$2,'synthetic-unused','active',$3)",
-      [user.id, user.id + "@moderation.test.invalid", role],
+      "INSERT INTO users(id,email,password_hash,status,role) VALUES($1,$2,$4,'active',$3)",
+      [user.id, user.id + "@moderation.test.invalid", role, stepUpHash],
     );
     await db.query(
       "INSERT INTO sessions(token_hash,user_id,csrf,expires_at) VALUES($1,$2,$3,now()+interval '1 hour')",
@@ -75,6 +85,24 @@ describe("moderator report review", () => {
       version: 0,
     });
     expect(JSON.stringify(queue)).not.toContain(users[REPORTER].id);
+  });
+  it("requires the moderator's password again before suspending", async () => {
+    const missing = await moderate("suspend", 0, MOD, "");
+    expect(missing.statusCode).toBe(403);
+    expect(missing.json().error.code).toBe("REAUTH_REQUIRED");
+    const wrong = await moderate("suspend", 0, MOD, "not-the-password");
+    expect(wrong.json().error.code).toBe("REAUTH_REQUIRED");
+    expect(
+      (await one(db, "SELECT status FROM users WHERE id=$1", [users[SUBJECT].id]))
+        .status,
+    ).toBe("active");
+  });
+  it("never shows moderators a member's private budget", async () => {
+    // Staff have no route to plans they are not part of.
+    const plan = await request(MOD, "GET", `/date-plans/${randomUUID()}`);
+    expect([403, 404]).toContain(plan.statusCode);
+    const queue = (await request(MOD, "GET", "/admin/reports")).json().data;
+    expect(JSON.stringify(queue)).not.toMatch(/budget/i);
   });
   it("suspends immediately, restores, and rejects stale versions", async () => {
     expect((await moderate("suspend", 0)).statusCode).toBe(200);

@@ -24,6 +24,13 @@ import { z, ZodError } from "zod";
 import { db, tx, one } from "./db.js";
 import { inbox, matchMembers, notify } from "./notifications.js";
 import {
+  enqueueEmail,
+  throttleClear,
+  throttleCount,
+  throttleHit,
+} from "./ops.js";
+import { registerExtraRoutes } from "./routes.js";
+import {
   authorizeHold,
   checkIn,
   claimNoShow,
@@ -48,6 +55,8 @@ import {
   savePreferences,
   assertPlanningOpen,
   cancelPlan,
+  firstFittingSlot,
+  fitsHours,
 } from "./domain.js";
 import { createOrder, captureOrder, ownPayment } from "./payments.js";
 import { provider } from "./providers/paypal.js";
@@ -59,12 +68,42 @@ import {
   planDates,
   TAG_TAXONOMY,
 } from "./providers/llm.js";
-import { Contracts, openapi } from "./contracts.js";
+import { Contracts, buildOpenApi } from "./contracts.js";
 const id = z.string().uuid();
 const body = (r: FastifyRequest, s: z.ZodType<any>) => s.parse(r.body);
 const param = (r: FastifyRequest, key = "id") =>
   id.parse((r.params as any)[key]);
 const ok = (data: any) => ({ data });
+// Coarse label only; the raw user agent is not stored.
+const deviceLabel = (ua?: string) => {
+  if (!ua) return "Unknown device";
+  const browser = /Edg\//.test(ua)
+    ? "Edge"
+    : /Chrome\//.test(ua)
+      ? "Chrome"
+      : /Firefox\//.test(ua)
+        ? "Firefox"
+        : /Safari\//.test(ua)
+          ? "Safari"
+          : "Browser";
+  const os = /Windows/.test(ua)
+    ? "Windows"
+    : /Android/.test(ua)
+      ? "Android"
+      : /iPhone|iPad/.test(ua)
+        ? "iOS"
+        : /Mac OS/.test(ua)
+          ? "macOS"
+          : /Linux/.test(ua)
+            ? "Linux"
+            : "";
+  return os ? `${browser} on ${os}` : browser;
+};
+const MEDIA_QUOTA = 12;
+const LOGIN_ACCOUNT_FAILURES = 8;
+const LOGIN_NETWORK_FAILURES = 40;
+const SIGNUPS_PER_NETWORK = 30;
+const RESETS_PER_ACCOUNT = 3;
 // Explanations use only interests both members publicly declared.
 const withShared = (cards: any[], own: any) =>
   cards.map((c) => ({
@@ -81,6 +120,11 @@ export async function authenticate(raw: string | undefined) {
     [hash(raw)],
   );
   if (!s) return fail(401, "SESSION_EXPIRED", "Please log in to continue.");
+  if (Date.now() - new Date(s.last_seen_at).getTime() > 5 * 60000)
+    await db.query(
+      "UPDATE sessions SET last_seen_at=now() WHERE token_hash=$1",
+      [s.token_hash],
+    );
   return s;
 }
 export async function buildApp() {
@@ -89,6 +133,11 @@ export async function buildApp() {
     bodyLimit: 15 * 1024 * 1024,
     // Narrowed for Fastify's overloads; strings/numbers are valid trustProxy values too.
     trustProxy: config.TRUST_PROXY as boolean,
+  });
+  const registered: { method: string; url: string }[] = [];
+  app.addHook("onRoute", (route) => {
+    for (const method of [route.method].flat())
+      registered.push({ method: String(method), url: route.url });
   });
   await app.register(cookie);
   await app.register(helmet, { contentSecurityPolicy: false });
@@ -148,12 +197,12 @@ export async function buildApp() {
       );
     return s;
   };
-  async function setSession(reply: any, user: string) {
+  async function setSession(reply: any, user: string, r?: FastifyRequest) {
     const raw = token();
     const csrf = token();
     await db.query(
-      "INSERT INTO sessions(token_hash,user_id,csrf,expires_at) VALUES($1,$2,$3,now()+interval '7 days')",
-      [hash(raw), user, csrf],
+      "INSERT INTO sessions(token_hash,user_id,csrf,expires_at,device) VALUES($1,$2,$3,now()+interval '7 days',$4)",
+      [hash(raw), user, csrf, deviceLabel(r?.headers["user-agent"])],
     );
     reply.setCookie("baepal", raw, {
       httpOnly: true,
@@ -224,7 +273,10 @@ export async function buildApp() {
         }),
       );
   });
-  app.get("/api/v1/openapi.json", async () => openapi);
+  let openapi: unknown = null;
+  app.get("/api/v1/openapi.json", async () =>
+    (openapi ??= buildOpenApi(registered)),
+  );
   app.get("/api/v1/health", async () => ok({ status: "ok" }));
   app.get("/api/v1/ready", async () => {
     await db.query("SELECT 1");
@@ -236,10 +288,21 @@ export async function buildApp() {
       paymentMode: config.PAYPAL_MODE,
       paypalClientId:
         config.PAYPAL_MODE === "sandbox" ? config.PAYPAL_CLIENT_ID : null,
-      emailMode: "local",
+      emailMode: config.EMAIL_MODE,
+      mediaModeration: config.MEDIA_MODERATION,
       aiMode: aiDescriptor().mode,
       ai: aiDescriptor(),
-      connections: { linkedin: "unavailable", github: "unavailable" },
+      connections: {
+        linkedin:
+          config.LINKEDIN_CLIENT_ID && config.LINKEDIN_CLIENT_SECRET
+            ? "available"
+            : "unavailable",
+        github:
+          config.GITHUB_CLIENT_ID && config.GITHUB_CLIENT_SECRET
+            ? "available"
+            : "unavailable",
+      },
+      planningPassCents: config.PLANNING_PASS_CENTS,
     }),
   );
   app.get("/api/v1/integrations/status", async (r) => {
@@ -268,7 +331,7 @@ export async function buildApp() {
       // completion on the stable account before touching challenge rows.
       const account = await one(
         c,
-        "SELECT id,status FROM users WHERE id=$1 FOR UPDATE",
+        "SELECT id,status,email FROM users WHERE id=$1 FOR UPDATE",
         [user],
       );
       if (
@@ -306,6 +369,15 @@ export async function buildApp() {
         "INSERT INTO challenges(id,user_id,purpose,code_hash,expires_at) VALUES($1,$2,$3,$4,now()+interval '10 minutes')",
         [cid, user, purpose, keyed(`${cid}:${code}`)],
       );
+      if (config.EMAIL_MODE !== "local") {
+        await enqueueEmail(c, {
+          userId: user,
+          to: account.email,
+          template: purpose === "reset" ? "challenge_reset" : "challenge_email",
+          data: { code, challengeId: cid },
+        });
+        return cid;
+      }
       const folder = new URL("../../../.data/mail/", import.meta.url);
       await mkdir(folder, { recursive: true, mode: 0o700 });
       await writeFile(
@@ -327,6 +399,12 @@ export async function buildApp() {
     async (r, reply) => {
       const b = body(r, Contracts.Signup);
       const email = b.email.trim().toLowerCase();
+      if ((await throttleHit("signup-ip", r.ip, 3600)) > SIGNUPS_PER_NETWORK)
+        return fail(
+          429,
+          "TOO_MANY_ATTEMPTS",
+          "Too many sign-ups from this network. Try again later.",
+        );
       const uid = randomUUID();
       const password = await argon2.hash(b.password);
       const inserted = await db.query(
@@ -343,7 +421,7 @@ export async function buildApp() {
         await c.query("INSERT INTO profile_private(user_id) VALUES($1)", [uid]);
       });
       const cid = await challenge(uid);
-      const csrf = await setSession(reply, uid);
+      const csrf = await setSession(reply, uid, r);
       return ok({
         message: "Check the local email capture for your confirmation code.",
         challengeId: cid,
@@ -356,24 +434,38 @@ export async function buildApp() {
     { config: { rateLimit: { max: 10, timeWindow: "10 minutes" } } },
     async (r, reply) => {
       const b = body(r, Contracts.Login);
-      const u = await one(db, "SELECT * FROM users WHERE email=$1", [
-        b.email.toLowerCase().trim(),
-      ]);
+      const email = b.email.toLowerCase().trim();
+      // Durable failure budgets per account and per network, shared across
+      // restarts and processes. Successful logins only clear the account budget.
+      if (
+        (await throttleCount("login-acct", email, 900)) >= LOGIN_ACCOUNT_FAILURES ||
+        (await throttleCount("login-ip", r.ip, 900)) >= LOGIN_NETWORK_FAILURES
+      )
+        return fail(
+          429,
+          "TOO_MANY_ATTEMPTS",
+          "Too many sign-in attempts. Wait 15 minutes or reset your password.",
+        );
+      const u = await one(db, "SELECT * FROM users WHERE email=$1", [email]);
       const valid = await argon2.verify(
         u?.password_hash || (await argon2.hash("invalid-password-placeholder")),
         b.password,
       );
-      if (!u || !valid || ["suspended", "deleted"].includes(u.status))
+      if (!u || !valid || ["suspended", "deleted"].includes(u.status)) {
+        await throttleHit("login-acct", email, 900);
+        await throttleHit("login-ip", r.ip, 900);
         return fail(
           401,
           "INVALID_CREDENTIALS",
           "Email or password is incorrect, or this account is unavailable.",
         );
+      }
+      await throttleClear("login-acct", email);
       if (r.cookies.baepal)
         await db.query("DELETE FROM sessions WHERE token_hash=$1", [
           hash(r.cookies.baepal),
         ]);
-      const csrf = await setSession(reply, u.id);
+      const csrf = await setSession(reply, u.id, r);
       return ok({ csrf, status: u.status });
     },
   );
@@ -440,7 +532,9 @@ export async function buildApp() {
         "SELECT id FROM users WHERE email=$1 AND status NOT IN ('deleted','suspended')",
         [b.email.toLowerCase().trim()],
       );
-      if (u) {
+      // Same neutral response whether the account exists, is throttled or
+      // is cooling down.
+      if (u && (await throttleHit("reset-acct", u.id, 3600)) <= RESETS_PER_ACCOUNT) {
         try {
           await challenge(u.id, "reset");
         } catch {
@@ -675,18 +769,18 @@ export async function buildApp() {
           "VERSION_CONFLICT",
           "Your profile changed. Refresh before saving.",
         );
+      let approvedPhotos = 0;
       for (const photo of b.photos) {
         const mid = photo.match(/^\/api\/v1\/media\/([a-f0-9-]{36})$/)?.[1];
         if (mid) {
-          if (
-            !(
-              await c.query("SELECT 1 FROM media WHERE id=$1 AND owner_id=$2", [
-                mid,
-                s.user_id,
-              ])
-            ).rowCount
-          )
+          const m = await one(
+            c,
+            "SELECT state FROM media WHERE id=$1 AND owner_id=$2",
+            [mid, s.user_id],
+          );
+          if (!m || m.state === "rejected")
             return fail(422, "INVALID_PHOTO", "Photo unavailable.");
+          if (m.state === "approved") approvedPhotos++;
         } else if (!(
           config.DEMO_MODE === "true" && /^\/portraits\/[0-5]\.svg$/.test(photo)
         ))
@@ -695,7 +789,18 @@ export async function buildApp() {
             "INVALID_PHOTO",
             "Use an uploaded photo or labeled demo illustration.",
           );
+        else approvedPhotos++;
       }
+      if (
+        (b.publish || ["active", "paused"].includes(s.status)) &&
+        approvedPhotos < 2 &&
+        b.photos.length >= 2
+      )
+        return fail(
+          422,
+          "PHOTOS_PENDING_REVIEW",
+          "Two approved photos are needed. Some are still waiting for review.",
+        );
       if (
         (b.publish || ["active", "paused"].includes(s.status)) &&
         (!b.birthDate ||
@@ -754,16 +859,39 @@ export async function buildApp() {
       .resize(1200, 1600, { fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 85 })
       .toBuffer();
+    const held = await one(
+      db,
+      "SELECT count(*)::int AS n FROM media WHERE owner_id=$1 AND state<>'rejected'",
+      [s.user_id],
+    );
+    if (held.n >= MEDIA_QUOTA)
+      return fail(
+        422,
+        "PHOTO_QUOTA",
+        `You can keep up to ${MEDIA_QUOTA} photos. Remove one first.`,
+      );
     const mid = randomUUID();
-    await db.query("INSERT INTO media(id,owner_id,bytes) VALUES($1,$2,$3)", [
-      mid,
-      s.user_id,
-      bytes,
-    ]);
+    const state = config.MEDIA_MODERATION === "auto" ? "approved" : "pending";
+    await db.query(
+      "INSERT INTO media(id,owner_id,bytes,state,reason,reviewed_at) VALUES($1,$2,$3,$4,$5,$6)",
+      [
+        mid,
+        s.user_id,
+        bytes,
+        state,
+        state === "approved"
+          ? "Development auto-approval: technical checks only, no content moderation provider."
+          : null,
+        state === "approved" ? new Date() : null,
+      ],
+    );
     return ok({
       url: `/api/v1/media/${mid}`,
+      state,
       moderation:
-        "Development only: technical validation, no content moderation provider.",
+        state === "approved"
+          ? "Development only: technical validation, no content moderation provider."
+          : "Waiting for moderator review. It won't be shown to others until approved.",
     });
   });
   app.get("/api/v1/media/:id", async (r, reply) => {
@@ -771,6 +899,8 @@ export async function buildApp() {
     const media = await one(db, "SELECT * FROM media WHERE id=$1", [param(r)]);
     if (!media) return fail(404, "UNAVAILABLE", "Image unavailable.");
     if (media.owner_id !== s.user_id) {
+      if (media.state !== "approved")
+        return fail(404, "UNAVAILABLE", "Image unavailable.");
       const m = await one(
         db,
         "SELECT id FROM matches WHERE low_id=LEAST($1::uuid,$2::uuid) AND high_id=GREATEST($1::uuid,$2::uuid) AND status='active'",
@@ -827,36 +957,101 @@ export async function buildApp() {
         cards.push(await publicProfile(db, x.actor_id));
     return ok(withShared(cards, await publicProfile(db, s.user_id)));
   });
+  // Ordered by shared declared interests, then user id. The cursor is an
+  // HMAC-signed keyset position bound to the member's current filters, so a
+  // filter change invalidates it instead of silently skipping people.
   app.get("/api/v1/discover", async (r) => {
     const s = await member(r);
-    const ids = (
+    const q = z
+      .object({
+        cursor: z.string().max(400).optional(),
+        limit: z.coerce.number().int().min(1).max(30).default(30),
+      })
+      .parse(r.query);
+    const me = await one(
+      db,
+      "SELECT p.city,p.interests,q.gender,q.genders,q.age_min,q.age_max,date_part('year',age(now(),q.birth_date))::int AS age FROM profiles p JOIN profile_private q ON q.user_id=p.user_id WHERE p.user_id=$1",
+      [s.user_id],
+    );
+    const filters = hash(
+      JSON.stringify([
+        me.city,
+        [...me.interests].sort(),
+        me.gender,
+        [...me.genders].sort(),
+        me.age_min,
+        me.age_max,
+      ]),
+    ).slice(0, 16);
+    let after: { n: number; id: string } | null = null;
+    if (q.cursor) {
+      const [payload, sig] = q.cursor.split(".");
+      let parsed: any = null;
+      try {
+        if (equal(sig ?? "", keyed(`discover:${s.user_id}:${payload}`)))
+          parsed = JSON.parse(Buffer.from(payload, "base64url").toString());
+      } catch {
+        parsed = null;
+      }
+      if (!parsed || parsed.f !== filters || parsed.e < Date.now())
+        return fail(
+          409,
+          "CURSOR_STALE",
+          "Your filters changed or this page expired. Start again from the top.",
+        );
+      after = { n: parsed.n, id: parsed.u };
+    }
+    const rows = (
       await db.query(
-        "SELECT user_id FROM profiles WHERE user_id<>$1 ORDER BY user_id",
-        [s.user_id],
+        `SELECT u.id, cardinality(ARRAY(SELECT unnest(p.interests) INTERSECT SELECT unnest($2::text[])))::int AS shared
+         FROM users u JOIN profiles p ON p.user_id=u.id JOIN profile_private q ON q.user_id=u.id
+         WHERE u.id<>$1 AND u.status='active' AND u.role='member' AND p.city=$3
+           AND q.gender=ANY($4::text[]) AND $5=ANY(q.genders)
+           AND date_part('year',age(now(),q.birth_date)) BETWEEN GREATEST($6,18) AND $7
+           AND $8 BETWEEN q.age_min AND q.age_max
+           AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.actor_id=$1 AND d.target_id=u.id)
+           AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.actor_id=$1 AND b.target_id=u.id) OR (b.actor_id=u.id AND b.target_id=$1))
+           AND NOT EXISTS (SELECT 1 FROM matches m WHERE m.low_id=LEAST($1::uuid,u.id) AND m.high_id=GREATEST($1::uuid,u.id))
+           AND ($9::int IS NULL OR cardinality(ARRAY(SELECT unnest(p.interests) INTERSECT SELECT unnest($2::text[]))) < $9
+                OR (cardinality(ARRAY(SELECT unnest(p.interests) INTERSECT SELECT unnest($2::text[]))) = $9 AND u.id > $10::uuid))
+         ORDER BY shared DESC, u.id
+         LIMIT $11`,
+        [
+          s.user_id,
+          me.interests,
+          me.city,
+          me.genders,
+          me.gender,
+          me.age_min,
+          me.age_max,
+          me.age,
+          after?.n ?? null,
+          after?.id ?? null,
+          q.limit + 1,
+        ],
       )
     ).rows;
+    const page = rows.slice(0, q.limit);
     const cards = [];
-    for (const x of ids) {
-      if (cards.length >= 30) break;
-      if (
-        (await eligible(db, s.user_id, x.user_id)) &&
-        !(
-          await db.query(
-            "SELECT 1 FROM decisions WHERE actor_id=$1 AND target_id=$2",
-            [s.user_id, x.user_id],
-          )
-        ).rowCount
-      )
-        cards.push(await publicProfile(db, x.user_id));
+    // The shared predicate still has the final say on every card.
+    for (const x of page)
+      if (await eligible(db, s.user_id, x.id))
+        cards.push(await publicProfile(db, x.id));
+    const last = page.at(-1);
+    let nextCursor: string | null = null;
+    if (rows.length > q.limit && last) {
+      const payload = Buffer.from(
+        JSON.stringify({
+          n: last.shared,
+          u: last.id,
+          f: filters,
+          e: Date.now() + 30 * 60000,
+        }),
+      ).toString("base64url");
+      nextCursor = `${payload}.${keyed(`discover:${s.user_id}:${payload}`)}`;
     }
     const own = await publicProfile(db, s.user_id);
-    cards.sort(
-      (a, b) =>
-        b.interests.filter((i: string) => own.interests.includes(i)).length -
-          a.interests.filter((i: string) => own.interests.includes(i)).length ||
-        a.user_id.localeCompare(b.user_id),
-    );
-    return ok(withShared(cards, own));
+    return { data: withShared(cards, own), nextCursor };
   });
   // ---- AI assistance: drafts only, never autonomous actions ----
   app.post(
@@ -1241,13 +1436,30 @@ export async function buildApp() {
         .find((x) => x.id);
       if (!pick) return fail(409, "NO_SHARED_OPTION", "No option could be chosen.");
       const step = 30 * 60000;
-      const startMs =
+      const startMs = firstFittingSlot(
+        pick,
         Math.ceil(
           Math.max(new Date(pick.earliestStart).getTime(), Date.now() + 10 * 60000) / step,
-        ) * step;
-      if (startMs + pick.duration_minutes * 60000 > new Date(pick.latestEnd).getTime())
-        return fail(409, "NO_SHARED_OPTION", "No time slot fits both windows.");
+        ) * step,
+        new Date(pick.latestEnd).getTime(),
+      );
+      if (startMs === null)
+        return fail(409, "NO_SHARED_OPTION", "No time slot fits both windows and opening hours.");
       const startsAt = new Date(startMs).toISOString();
+      const pass = await one(
+        db,
+        "SELECT 1 FROM entitlements WHERE user_id=$1 AND product='planning_pass' AND state='active'",
+        [s.user_id],
+      );
+      const alternatives = pass
+        ? planned.ranked
+            .filter((x) => x.id !== pick.id)
+            .slice(0, 3)
+            .map((x) => {
+              const o = available.find((a) => a.id === x.id)!;
+              return { id: o.id, title: o.title, price_cents: o.price_cents, reason: x.reason };
+            })
+        : null;
       const result = await tx(async (c) => {
         const p = await planFor(c, param(r), s.user_id, true);
         if (p.version !== p0.version)
@@ -1289,6 +1501,7 @@ export async function buildApp() {
           option: { id: pick.id, title: pick.title, price_cents: pick.price_cents },
           startsAt,
           reason: pick.reason,
+          alternatives,
           source: planned.source,
           model: planned.source === "model" ? ai.model : null,
           steps: [
@@ -1343,6 +1556,12 @@ export async function buildApp() {
           422,
           "OPTION_UNAVAILABLE",
           "Choose an eligible time and experience.",
+        );
+      if (!fitsHours(x, start))
+        return fail(
+          422,
+          "OUTSIDE_OPENING_HOURS",
+          "That time is outside the venue's opening hours (Seattle time).",
         );
       const version = p.version + 1;
       await c.query(
@@ -1670,6 +1889,27 @@ export async function buildApp() {
         notifications: await rows(
           "SELECT category,read_at,created_at FROM notifications WHERE user_id=$1",
         ),
+        settings: await rows(
+          "SELECT read_receipts,typing_indicators,email_updates,updated_at FROM member_settings WHERE user_id=$1",
+        ),
+        sessions: await rows(
+          "SELECT id,device,created_at,last_seen_at,expires_at FROM sessions WHERE user_id=$1",
+        ),
+        paypalIdentity: await rows(
+          "SELECT verified,mode,linked_at FROM paypal_identities WHERE user_id=$1",
+        ),
+        connections: await rows(
+          "SELECT provider,label,visible,linked_at FROM connections WHERE user_id=$1",
+        ),
+        appeals: await rows(
+          "SELECT id,state,text,created_at FROM appeals WHERE user_id=$1",
+        ),
+        entitlements: await rows(
+          "SELECT id,product,amount_cents,state,created_at FROM entitlements WHERE user_id=$1",
+        ),
+        deposits: await rows(
+          "SELECT id,plan_id,amount_cents,state,checked_in_at,created_at FROM date_deposits WHERE user_id=$1",
+        ),
         note: "Includes only data you created or that is about your own account. Partner private inputs (budgets, availability), partner messages, session tokens and moderation notes are excluded.",
       }),
     );
@@ -1708,9 +1948,14 @@ export async function buildApp() {
       await c.query("DELETE FROM notifications WHERE user_id=$1", [
         s.user_id,
       ]);
-      await c.query("DELETE FROM paypal_identities WHERE user_id=$1", [
-        s.user_id,
-      ]);
+      for (const table of [
+        "paypal_identities",
+        "email_outbox",
+        "member_settings",
+        "read_watermarks",
+        "connections",
+      ])
+        await c.query(`DELETE FROM ${table} WHERE user_id=$1`, [s.user_id]);
       await c.query("UPDATE messages SET text='[deleted]' WHERE sender_id=$1", [
         s.user_id,
       ]);
@@ -1759,10 +2004,23 @@ export async function buildApp() {
           state: z.enum(["reviewed", "dismissed"]).optional(),
           reason: z.string().min(5).max(1000),
           expectedVersion: z.number().int().min(0).optional(),
+          password: z.string().max(128).optional(),
         })
         .refine((x) => x.action || x.state, "Choose a moderation action."),
     );
     const action = b.action ?? (b.state === "dismissed" ? "dismiss" : null);
+    // Account-level actions need the moderator's password again (step-up).
+    if (["suspend", "restore"].includes(action ?? "")) {
+      const staff = await one(db, "SELECT password_hash FROM users WHERE id=$1", [
+        s.user_id,
+      ]);
+      if (!b.password || !(await argon2.verify(staff.password_hash, b.password)))
+        return fail(
+          403,
+          "REAUTH_REQUIRED",
+          "Confirm your password to suspend or restore an account.",
+        );
+    }
     const subject = await tx(async (c) => {
       const report = await one(
         c,
@@ -1852,6 +2110,7 @@ export async function buildApp() {
       ).rows,
     );
   });
+  registerExtraRoutes(app, { io, session, member });
   io.use(async (socket, next) => {
     try {
       const raw = app.parseCookie(socket.request.headers.cookie || "").baepal;

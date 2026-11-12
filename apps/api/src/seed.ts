@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import argon2 from "argon2";
 import { db, tx } from "./db.js";
 import { config } from "./config.js";
+import { encrypt } from "./crypto.js";
 if (config.DEMO_MODE !== "true")
   throw Error("Seed requires DEMO_MODE=true on local/staging.");
 const names = [
@@ -29,6 +30,24 @@ const bios = [
   "Equal parts curious and considerate. Let’s make a new favorite memory.",
 ];
 const password = await argon2.hash("Demo-Only-2026!");
+// Seattle local opening hours [open, close] in whole hours, 24 = midnight.
+const VENUE_FACTS: Record<
+  string,
+  { neighborhood: string; stepFree: boolean; hours: [number, number] }
+> = {
+  coffee: { neighborhood: "Waterfront", stepFree: true, hours: [7, 22] },
+  art: { neighborhood: "Capitol Hill", stepFree: true, hours: [10, 22] },
+  walk: { neighborhood: "Waterfront", stepFree: true, hours: [0, 24] },
+  bookshop: { neighborhood: "Fremont", stepFree: false, hours: [9, 22] },
+  pottery: { neighborhood: "Ballard", stepFree: false, hours: [12, 22] },
+  acoustic: { neighborhood: "Capitol Hill", stepFree: true, hours: [17, 24] },
+  picnic: { neighborhood: "Wallingford", stepFree: true, hours: [6, 22] },
+  foodtrucks: {
+    neighborhood: "South Lake Union",
+    stepFree: true,
+    hours: [11, 22],
+  },
+};
 await tx(async (c) => {
   for (let i = 0; i < names.length; i++) {
     const email = `${names[i].toLowerCase()}@demo.baepal.invalid`;
@@ -282,7 +301,9 @@ await tx(async (c) => {
     },
   ])
     await c.query(
-      "INSERT INTO catalogue(id,title,activity,description,address,price_cents,duration_minutes,accessibility,policy) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING",
+      `INSERT INTO catalogue(id,title,activity,description,address,price_cents,duration_minutes,accessibility,policy,neighborhood,step_free,opens_minute,closes_minute,source)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Fictional demo catalogue (BaePal seed). Hours and access are invented for the demo.')
+       ON CONFLICT(id) DO UPDATE SET neighborhood=EXCLUDED.neighborhood,step_free=EXCLUDED.step_free,opens_minute=EXCLUDED.opens_minute,closes_minute=EXCLUDED.closes_minute,accessibility=EXCLUDED.accessibility,source=EXCLUDED.source`,
       [
         x.id,
         x.title,
@@ -291,12 +312,122 @@ await tx(async (c) => {
         x.address,
         x.price,
         x.duration,
-        "Demo catalogue: step-free route; accessibility must be independently checked for real outings.",
+        VENUE_FACTS[x.id].stepFree
+          ? "Demo listing says step-free entry. Check independently for real outings."
+          : "Demo listing has steps at the entrance. Check independently for real outings.",
         "Full demo ticket refund on cancellation before the scheduled date.",
+        VENUE_FACTS[x.id].neighborhood,
+        VENUE_FACTS[x.id].stepFree,
+        VENUE_FACTS[x.id].hours[0] * 60,
+        VENUE_FACTS[x.id].hours[1] * 60,
       ],
     );
+  // ---- Scenario fixtures (synthetic, labelled mock payments) ----------
+  const ensureMatch = async (a: string, b: string) => {
+    const [x, y] = [await userId(a), await userId(b)].sort();
+    for (const [actor, target] of [
+      [x, y],
+      [y, x],
+    ])
+      await c.query(
+        "INSERT INTO decisions(actor_id,target_id,action,mutation_id) VALUES($1,$2,'like',$3) ON CONFLICT DO NOTHING",
+        [actor, target, randomUUID()],
+      );
+    return (
+      await c.query(
+        "INSERT INTO matches(id,low_id,high_id) VALUES($1,$2,$3) ON CONFLICT(low_id,high_id) DO UPDATE SET low_id=EXCLUDED.low_id RETURNING id",
+        [randomUUID(), x, y],
+      )
+    ).rows[0].id as string;
+  };
+  const fixturePlan = async (
+    matchId: string,
+    creator: string,
+    status: string,
+    financial: string,
+  ) => {
+    const existing = await c.query(
+      "SELECT id FROM date_plans WHERE match_id=$1",
+      [matchId],
+    );
+    if (existing.rowCount) return null;
+    return (
+      await c.query(
+        "INSERT INTO date_plans(id,match_id,creator_id,status,financial_state,version,expires_at) VALUES($1,$2,$3,$4,$5,$6,now()+interval '3 days') RETURNING id",
+        [randomUUID(), matchId, await userId(creator), status, financial, status === "collecting_preferences" ? 0 : 1],
+      )
+    ).rows[0].id as string;
+  };
+  const prefs = async (plan: string, who: string, budget: number, activities: string[]) =>
+    c.query(
+      "INSERT INTO private_date_preferences(plan_id,user_id,budget_encrypted,activities,time_start,time_end) VALUES($1,$2,$3,$4,now()+interval '1 day',now()+interval '1 day 6 hours') ON CONFLICT DO NOTHING",
+      [plan, await userId(who), encrypt(String(budget)), activities],
+    );
+  const art = { id: "art", title: "An evening of art & possibility", activity: "Art", price_cents: 3000, duration_minutes: 90, address: "Demo venue · Capitol Hill, Seattle" };
+  const proposeArt = async (plan: string, accepters: string[]) => {
+    await c.query(
+      "INSERT INTO proposals(plan_id,version,catalogue_id,starts_at,snapshot) VALUES($1,1,'art',date_trunc('hour',now())+interval '1 day 2 hours',$2) ON CONFLICT DO NOTHING",
+      [plan, JSON.stringify(art)],
+    );
+    for (const who of accepters)
+      await c.query("INSERT INTO acceptances VALUES($1,1,$2) ON CONFLICT DO NOTHING", [plan, await userId(who)]);
+  };
+  const ticket = async (plan: string, who: string, paymentState: string, purchaseState: string, refunded = false) => {
+    const purchase = randomUUID(), payment = randomUUID();
+    await c.query(
+      "INSERT INTO purchases(id,plan_id,version,buyer_id,amount_cents,snapshot,state) VALUES($1,$2,1,$3,3000,$4,$5)",
+      [purchase, plan, await userId(who), JSON.stringify(art), purchaseState],
+    );
+    await c.query(
+      "INSERT INTO payments(id,purchase_id,mode,state,order_id,capture_id) VALUES($1,$2,'mock',$3,$4,$5)",
+      [payment, purchase, paymentState, `MOCK-FIXTURE-${payment.slice(0, 8)}`, paymentState === "pending" ? null : `CAP-FIXTURE-${payment.slice(0, 8)}`],
+    );
+    if (refunded)
+      await c.query(
+        "INSERT INTO refunds(id,payment_id,amount_cents,provider_id,state,kind) VALUES($1,$2,3000,$3,'completed','cancellation')",
+        [randomUUID(), payment, `REF-FIXTURE-${payment.slice(0, 8)}`],
+      );
+  };
+  // No-results discovery preferences.
+  await c.query(
+    "UPDATE profile_private SET age_min=70,age_max=80 WHERE user_id=$1",
+    [await userId("rowan")],
+  );
+  // No budget overlap: Sam's $0 budget and Riley's Art-only list share nothing.
+  const noOverlap = await fixturePlan(await ensureMatch("sam", "riley"), "sam", "collecting_preferences", "unpaid");
+  if (noOverlap) {
+    await prefs(noOverlap, "sam", 0, ["Coffee"]);
+    await prefs(noOverlap, "riley", 5000, ["Art"]);
+  }
+  // Pending capture: Taylor paid, Morgan's capture is still PENDING at PayPal.
+  const pending = await fixturePlan(await ensureMatch("taylor", "morgan"), "taylor", "payment_pending", "partially_paid");
+  if (pending) {
+    await prefs(pending, "taylor", 4000, ["Art"]);
+    await prefs(pending, "morgan", 4000, ["Art"]);
+    await proposeArt(pending, ["taylor", "morgan"]);
+    await ticket(pending, "taylor", "completed", "paid");
+    await ticket(pending, "morgan", "pending", "created");
+  }
+  // Cancelled after both paid; both tickets fully refunded.
+  const cancelled = await fixturePlan(await ensureMatch("casey", "quinn"), "casey", "cancelled", "refunded");
+  if (cancelled) {
+    await prefs(cancelled, "casey", 4000, ["Art"]);
+    await prefs(cancelled, "quinn", 4000, ["Art"]);
+    await proposeArt(cancelled, ["casey", "quinn"]);
+    await ticket(cancelled, "casey", "refunded", "refunded", true);
+    await ticket(cancelled, "quinn", "refunded", "refunded", true);
+  }
+  // A declined proposal waiting for a new idea.
+  const declined = await fixturePlan(await ensureMatch("jamie", "sage"), "jamie", "collecting_preferences", "unpaid");
+  if (declined) {
+    await prefs(declined, "jamie", 4000, ["Art", "Coffee"]);
+    await prefs(declined, "sage", 4000, ["Art", "Coffee"]);
+    await proposeArt(declined, ["jamie"]);
+    await c.query("DELETE FROM acceptances WHERE plan_id=$1", [declined]);
+    await c.query("INSERT INTO proposal_declines(plan_id,version,user_id) VALUES($1,1,$2)", [declined, await userId("sage")]);
+  }
 });
 console.log(
-  "Seeded 16 fictional adults, a demo moderator, two open reports and one block. Local demo password is documented in README.",
+  "Seeded 16 fictional adults, a demo moderator, two open reports, one block and scenario fixtures (no-results filters, no budget overlap, pending capture, cancelled + refunded, declined proposal). Payments in fixtures are labelled mock. Local demo password is documented in README.",
 );
 await db.end();

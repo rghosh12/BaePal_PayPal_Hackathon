@@ -51,6 +51,10 @@ const when = (v: string) =>
     timeStyle: "short",
     timeZone: "America/Los_Angeles",
   }).format(new Date(v)) + " · Seattle time";
+const urlParam = (key: string) =>
+  typeof window === "undefined"
+    ? ""
+    : new URLSearchParams(window.location.search).get(key) || "";
 // Half-hour starts that fit the option's window; the server re-validates.
 const startSlots = (x: Row) => {
   const out: string[] = [];
@@ -1008,15 +1012,22 @@ export default function BaePal() {
                       Email
                       <input name="email" type="email" autoComplete="email" />
                     </label>
-                    <details>
+                    <details open={!!urlParam("token")}>
                       <summary>I have a reset token</summary>
                       <label>
                         Challenge ID
-                        <input name="challenge" />
+                        <input
+                          name="challenge"
+                          defaultValue={urlParam("challenge")}
+                        />
                       </label>
                       <label>
                         Reset token
-                        <input name="token" autoComplete="off" />
+                        <input
+                          name="token"
+                          autoComplete="off"
+                          defaultValue={urlParam("token")}
+                        />
                       </label>
                       <label>
                         New password

@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { one, type Conn } from "./db.js";
+import { enqueueUpdateEmail } from "./ops.js";
 
 export const NOTIFICATION_TITLES: Record<string, string> = {
   "match.created": "You have a new match.",
   "message.received": "You have a new message.",
   "date.proposed": "A date plan needs your review.",
   "date.confirmed": "A date plan is confirmed.",
+  "date.declined": "Your match passed on a date idea. Try another one.",
   "payment.completed": "Your PayPal payment completed.",
   "refund.completed": "Your PayPal refund completed.",
   "deposit.held": "Your match placed their no-show hold.",
@@ -31,11 +33,13 @@ export async function notify(
   matchId: string | null,
 ) {
   const event = eventId(key);
-  for (const uid of recipients)
-    await c.query(
+  for (const uid of recipients) {
+    const inserted = await c.query(
       "INSERT INTO notifications(id,user_id,event_id,category,match_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
       [randomUUID(), uid, event, category, matchId],
     );
+    if (inserted.rowCount) await enqueueUpdateEmail(c, uid);
+  }
 }
 
 export async function matchMembers(c: Conn, matchId: string) {

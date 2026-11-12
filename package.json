@@ -13,6 +13,7 @@
     "db:migrate": "pnpm --filter @baepal/api migrate",
     "db:seed": "pnpm --filter @baepal/api seed",
     "check:keys": "pnpm --filter @baepal/api check:keys",
+    "keys:rotate": "pnpm --filter @baepal/api keys:rotate",
     "test": "pnpm --filter @baepal/integrations test && bash scripts/test.sh && pnpm --filter @baepal/hosted test",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",

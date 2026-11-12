@@ -63,7 +63,8 @@ export async function publicProfile(c: Conn | typeof db, id: string) {
   return one(
     c,
     `SELECT p.*,date_part('year',age(now(),q.birth_date))::int AS age,
-       EXISTS(SELECT 1 FROM paypal_identities i WHERE i.user_id=p.user_id AND i.verified) AS paypal_verified
+       EXISTS(SELECT 1 FROM paypal_identities i WHERE i.user_id=p.user_id AND i.verified) AS paypal_verified,
+       ARRAY(SELECT c.provider FROM connections c WHERE c.user_id=p.user_id AND c.visible ORDER BY c.provider) AS connections
      FROM profiles p JOIN profile_private q ON q.user_id=p.user_id WHERE p.user_id=$1`,
     [id],
   );
@@ -272,6 +273,11 @@ export async function planDTO(c: Conn | typeof db, p: any, user: string) {
       [p.id, p.version],
     )
   ).rows;
+  const declined = await one(
+    c,
+    "SELECT user_id FROM proposal_declines WHERE plan_id=$1 AND version=$2 LIMIT 1",
+    [p.id, p.version],
+  );
   return {
     id: p.id,
     matchId: p.match_id,
@@ -286,6 +292,9 @@ export async function planDTO(c: Conn | typeof db, p: any, user: string) {
           activities: own.activities,
           timeStart: own.time_start,
           timeEnd: own.time_end,
+          stepFree: own.step_free,
+          neighborhoods: own.neighborhoods,
+          timezone: own.timezone,
         }
       : null,
     proposal: proposal
@@ -295,6 +304,11 @@ export async function planDTO(c: Conn | typeof db, p: any, user: string) {
     acceptanceCount: accepted.length,
     yourTicket: paid.find((r) => r.buyer_id === user)?.state || "not purchased",
     partnerPaid: paid.some((r) => r.buyer_id !== user && r.state === "paid"),
+    declinedBy: declined
+      ? declined.user_id === user
+        ? "you"
+        : "partner"
+      : null,
   };
 }
 export function assertPlanningOpen(p: any) {
@@ -304,6 +318,93 @@ export function assertPlanningOpen(p: any) {
     new Date(p.expires_at).getTime() <= Date.now()
   )
     return fail(409, "PLAN_CLOSED", "This plan cannot be edited or replanned.");
+}
+// Venues are in Seattle; opening hours are local wall-clock minutes there.
+export const VENUE_TZ = "America/Los_Angeles";
+function wallParts(ms: number, tz: string) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(ms))
+      .map((p) => [p.type, p.value]),
+  );
+  return parts as Record<string, string>;
+}
+export const localMinute = (ms: number, tz = VENUE_TZ) => {
+  const p = wallParts(ms, tz);
+  return Number(p.hour) * 60 + Number(p.minute);
+};
+export const isTimeZone = (tz: string) => {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+};
+// Resolves a local wall time ("2026-11-01T01:30") in an IANA zone. During
+// the autumn change one wall time maps to two instants (ambiguous); during
+// the spring change some wall times never happen (nonexistent).
+export function resolveLocalTime(local: string, tz: string) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(local);
+  if (!m || !isTimeZone(tz)) return { status: "invalid" as const, instants: [] };
+  const asUtc = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  const offset = (ms: number) => {
+    const p = wallParts(ms, tz);
+    return (
+      Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) -
+      Math.floor(ms / 60000) * 60000
+    );
+  };
+  const instants = [
+    ...new Set(
+      [offset(asUtc - 864e5), offset(asUtc), offset(asUtc + 864e5)].map(
+        (o) => asUtc - o,
+      ),
+    ),
+  ]
+    .filter((ms) => {
+      const p = wallParts(ms, tz);
+      return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}` === local;
+    })
+    .sort((a, b) => a - b)
+    .map((ms) => new Date(ms).toISOString());
+  return {
+    status:
+      instants.length === 1
+        ? ("ok" as const)
+        : instants.length > 1
+          ? ("ambiguous" as const)
+          : ("nonexistent" as const),
+    instants,
+  };
+}
+export const fitsHours = (x: any, startMs: number) => {
+  const start = localMinute(startMs);
+  return (
+    start >= (x.opens_minute ?? 0) &&
+    start + x.duration_minutes <= (x.closes_minute ?? 1440)
+  );
+};
+export function firstFittingSlot(x: any, fromMs: number, endMs: number) {
+  const step = 30 * 60000;
+  const fits = (t: number) =>
+    t + x.duration_minutes * 60000 <= endMs && fitsHours(x, t);
+  if (fits(fromMs)) return fromMs;
+  for (
+    let t = Math.ceil(fromMs / step) * step;
+    t + x.duration_minutes * 60000 <= endMs;
+    t += step
+  )
+    if (fits(t)) return t;
+  return null;
 }
 export async function options(c: Conn | typeof db, plan: string) {
   assertPlanningOpen(
@@ -328,19 +429,26 @@ export async function options(c: Conn | typeof db, plan: string) {
   const items = (
     await c.query("SELECT * FROM catalogue ORDER BY price_cents,id")
   ).rows;
+  // Hard filters: budgets, activities, step-free access, neighbourhoods and
+  // at least one start inside both windows and the venue's opening hours.
   return items
     .filter(
       (x) =>
         prefs.every(
           (p) =>
             x.price_cents <= Number(decrypt(p.budget_encrypted)) &&
-            (p.activities.length === 0 || p.activities.includes(x.activity)),
-        ) && start + x.duration_minutes * 60000 <= end,
+            (p.activities.length === 0 || p.activities.includes(x.activity)) &&
+            (!p.step_free || x.step_free) &&
+            (!p.neighborhoods?.length ||
+              p.neighborhoods.includes(x.neighborhood)),
+        ) && firstFittingSlot(x, start, end) !== null,
     )
     .map((x) => ({
       ...x,
       earliestStart: new Date(start).toISOString(),
       latestEnd: new Date(end).toISOString(),
+      firstSlot: new Date(firstFittingSlot(x, start, end)!).toISOString(),
+      timezone: VENUE_TZ,
     }));
 }
 export async function savePreferences(
@@ -351,7 +459,7 @@ export async function savePreferences(
 ) {
   assertPlanningOpen(p);
   await c.query(
-    "INSERT INTO private_date_preferences(plan_id,user_id,budget_encrypted,activities,time_start,time_end) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(plan_id,user_id) DO UPDATE SET budget_encrypted=EXCLUDED.budget_encrypted,activities=EXCLUDED.activities,time_start=EXCLUDED.time_start,time_end=EXCLUDED.time_end",
+    "INSERT INTO private_date_preferences(plan_id,user_id,budget_encrypted,activities,time_start,time_end,step_free,neighborhoods,timezone) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(plan_id,user_id) DO UPDATE SET budget_encrypted=EXCLUDED.budget_encrypted,activities=EXCLUDED.activities,time_start=EXCLUDED.time_start,time_end=EXCLUDED.time_end,step_free=EXCLUDED.step_free,neighborhoods=EXCLUDED.neighborhoods,timezone=EXCLUDED.timezone",
     [
       p.id,
       user,
@@ -359,6 +467,9 @@ export async function savePreferences(
       body.activities,
       body.timeStart,
       body.timeEnd,
+      body.stepFree ?? false,
+      body.neighborhoods ?? [],
+      body.timezone ?? VENUE_TZ,
     ],
   );
   if (p.version) {

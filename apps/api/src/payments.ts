@@ -153,7 +153,7 @@ export async function recordOrder(id: string, order: any) {
       consentExpired
     ) {
       await c.query(
-        "INSERT INTO outbox(id,kind,aggregate_id,generation) VALUES($1,'cancel_plan',$2,1) ON CONFLICT(kind,aggregate_id) DO UPDATE SET state='pending',available_at=now(),generation=outbox.generation+1",
+        "INSERT INTO outbox(id,kind,aggregate_id,generation) VALUES($1,'cancel_plan',$2,1) ON CONFLICT(kind,aggregate_id) DO UPDATE SET state='pending',available_at=now(),locked_until=NULL,generation=outbox.generation+1",
         [randomUUID(), plan.id],
       );
       await c.query(
@@ -217,26 +217,31 @@ export async function captureOrder(user: string, id: string) {
     );
   }
 }
-async function refundPayment(pay: any) {
-  if (!pay.capture_id) return;
-  const refund = await tx(async (c) => {
-    await c.query("SELECT id FROM payments WHERE id=$1 FOR UPDATE", [pay.id]);
-    return one(
-      c,
-      "INSERT INTO refunds(id,payment_id,amount_cents) VALUES($1,$2,$3) ON CONFLICT(payment_id) DO UPDATE SET payment_id=EXCLUDED.payment_id RETURNING *",
-      [randomUUID(), pay.id, pay.amount_cents],
-    );
-  });
+// Refunds already committed against a capture (completed or still in flight).
+const COMMITTED_REFUNDS =
+  "SELECT COALESCE(sum(amount_cents),0)::int AS n FROM refunds WHERE payment_id=$1 AND state IN ('requested','pending','completed')";
+async function markRefunded(c: any, pay: any) {
+  await c.query(
+    "UPDATE payments SET state='refunded',updated_at=now() WHERE id=$1",
+    [pay.id],
+  );
+  await c.query("UPDATE purchases SET state='refunded' WHERE id=$1", [
+    pay.purchase_id,
+  ]);
+}
+// Sends (or re-checks) one refund row against the provider and records the
+// verified outcome. The payment is refunded only once completed refunds add
+// up to the full captured amount.
+async function settleRefund(pay: any, refund: any) {
   if (refund.state === "completed") return;
   await db.query("UPDATE refunds SET state='pending' WHERE id=$1", [refund.id]);
-  let result;
-  if (refund.provider_id) result = await provider.getRefund(refund.provider_id);
-  else
-    result = await provider.refundCapture(
-      pay.capture_id,
-      refund.amount_cents,
-      refund.id,
-    );
+  const result = refund.provider_id
+    ? await provider.getRefund(refund.provider_id)
+    : await provider.refundCapture(
+        pay.capture_id,
+        refund.amount_cents,
+        refund.id,
+      );
   verifiedRefund(result, refund.amount_cents);
   await tx(async (c) => {
     await c.query("SELECT id FROM payments WHERE id=$1 FOR UPDATE", [pay.id]);
@@ -246,39 +251,122 @@ async function refundPayment(pay: any) {
       result.id,
       completed ? "completed" : "pending",
     ]);
-    if (completed) {
-      await c.query(
-        "UPDATE payments SET state='refunded',updated_at=now() WHERE id=$1",
+    if (!completed) return;
+    await c.query(
+      "INSERT INTO financial_events(id,payment_id,type,source_id) VALUES($1,$2,'refund.completed',$3) ON CONFLICT DO NOTHING",
+      [randomUUID(), pay.id, result.id],
+    );
+    const total = await one(
+      c,
+      "SELECT COALESCE(sum(amount_cents),0)::int AS n FROM refunds WHERE payment_id=$1 AND state='completed'",
+      [pay.id],
+    );
+    if (total.n >= pay.amount_cents) await markRefunded(c, pay);
+    const owner = await one(
+      c,
+      "SELECT u.buyer_id,d.match_id FROM purchases u JOIN date_plans d ON d.id=u.plan_id WHERE u.id=$1",
+      [pay.purchase_id],
+    );
+    if (owner)
+      await notify(
+        c,
+        [owner.buyer_id],
+        `refund:${result.id}`,
+        "refund.completed",
+        owner.match_id,
+      );
+  });
+}
+async function refundPayment(pay: any) {
+  if (!pay.capture_id) return;
+  const refund = await tx(async (c) => {
+    await c.query("SELECT id FROM payments WHERE id=$1 FOR UPDATE", [pay.id]);
+    const existing = await one(
+      c,
+      "SELECT * FROM refunds WHERE payment_id=$1 AND kind='cancellation'",
+      [pay.id],
+    );
+    if (existing) return existing;
+    const committed = await one(c, COMMITTED_REFUNDS, [pay.id]);
+    const remaining = pay.amount_cents - committed.n;
+    if (remaining <= 0) {
+      const open = await one(
+        c,
+        "SELECT 1 FROM refunds WHERE payment_id=$1 AND state<>'completed'",
         [pay.id],
       );
-      await c.query("UPDATE purchases SET state='refunded' WHERE id=$1", [
-        pay.purchase_id,
-      ]);
-      await c.query(
-        "INSERT INTO financial_events(id,payment_id,type,source_id) VALUES($1,$2,'refund.completed',$3) ON CONFLICT DO NOTHING",
-        [randomUUID(), pay.id, result.id],
-      );
-      const owner = await one(
-        c,
-        "SELECT u.buyer_id,d.match_id FROM purchases u JOIN date_plans d ON d.id=u.plan_id WHERE u.id=$1",
-        [pay.purchase_id],
-      );
-      if (owner)
-        await notify(
-          c,
-          [owner.buyer_id],
-          `refund:${result.id}`,
-          "refund.completed",
-          owner.match_id,
-        );
+      if (!open) await markRefunded(c, pay);
+      return null;
     }
+    return one(
+      c,
+      "INSERT INTO refunds(id,payment_id,amount_cents,kind) VALUES($1,$2,$3,'cancellation') RETURNING *",
+      [randomUUID(), pay.id, remaining],
+    );
   });
+  // In-flight partial refunds are re-checked so cancellation can settle.
+  for (const partial of (
+    await db.query(
+      "SELECT * FROM refunds WHERE payment_id=$1 AND kind='partial' AND state IN ('requested','pending')",
+      [pay.id],
+    )
+  ).rows)
+    await settleRefund(pay, partial);
+  if (refund) await settleRefund(pay, refund);
+}
+// Support-initiated partial refund. The payment row lock makes the
+// "never refund more than was captured" check atomic across concurrent calls.
+export async function partialRefund(
+  paymentId: string,
+  amountCents: number,
+  reason: string,
+) {
+  const { pay, refund } = await tx(async (c) => {
+    const pay = await one(
+      c,
+      "SELECT p.*,u.amount_cents FROM payments p JOIN purchases u ON u.id=p.purchase_id WHERE p.id=$1 FOR UPDATE OF p",
+      [paymentId],
+    );
+    if (!pay) return fail(404, "UNAVAILABLE", "Payment unavailable.");
+    if (pay.state !== "completed" || !pay.capture_id)
+      return fail(
+        409,
+        "NOT_REFUNDABLE",
+        "Only a completed capture can be partially refunded.",
+      );
+    const committed = await one(c, COMMITTED_REFUNDS, [pay.id]);
+    if (committed.n + amountCents > pay.amount_cents)
+      return fail(
+        422,
+        "REFUND_EXCEEDS_CAPTURE",
+        `At most ${pay.amount_cents - committed.n} cents can still be refunded.`,
+      );
+    const refund = await one(
+      c,
+      "INSERT INTO refunds(id,payment_id,amount_cents,kind,reason) VALUES($1,$2,$3,'partial',$4) RETURNING *",
+      [randomUUID(), pay.id, amountCents, reason],
+    );
+    return { pay, refund };
+  });
+  try {
+    await settleRefund(pay, refund);
+  } catch {
+    // Left pending with a stable refund id; the next attempt re-checks it.
+  }
+  return one(db, "SELECT id,amount_cents,state,kind FROM refunds WHERE id=$1", [
+    refund.id,
+  ]);
 }
 // No provider calls run under these locks. recordOrder takes the plan lock before
 // rearming the outbox; this matching order makes the generation fence atomic with
 // financial-state bookkeeping. Payment rows are read without locks because
 // recordOrder locks a payment before its plan.
-async function finishCancellation(job: any, failed = false) {
+export const JOB_ATTEMPT_LIMIT = 10;
+async function finishCancellation(
+  job: any,
+  failed = false,
+  error?: string,
+) {
   await tx(async (c) => {
     const plan = await one(
       c,
@@ -288,7 +376,7 @@ async function finishCancellation(job: any, failed = false) {
     if (!plan) return;
     const current = await one(
       c,
-      "SELECT state,generation FROM outbox WHERE id=$1 FOR UPDATE",
+      "SELECT state,generation,attempts FROM outbox WHERE id=$1 FOR UPDATE",
       [job.id],
     );
     if (
@@ -299,7 +387,7 @@ async function finishCancellation(job: any, failed = false) {
       return;
     const payments = (
       await c.query(
-        "SELECT p.state,p.order_id,p.capture_id,u.amount_cents,r.state AS refund_state,r.amount_cents AS refunded_cents FROM payments p JOIN purchases u ON u.id=p.purchase_id LEFT JOIN refunds r ON r.payment_id=p.id WHERE u.plan_id=$1",
+        "SELECT p.state,p.order_id,p.capture_id,u.amount_cents,CASE WHEN EXISTS(SELECT 1 FROM refunds r WHERE r.payment_id=p.id) AND NOT EXISTS(SELECT 1 FROM refunds r WHERE r.payment_id=p.id AND r.state<>'completed') THEN 'completed' END AS refund_state,(SELECT sum(r.amount_cents)::int FROM refunds r WHERE r.payment_id=p.id AND r.state='completed') AS refunded_cents FROM payments p JOIN purchases u ON u.id=p.purchase_id WHERE u.plan_id=$1",
         [job.aggregate_id],
       )
     ).rows;
@@ -329,13 +417,26 @@ async function finishCancellation(job: any, failed = false) {
           : "refund_pending",
     ]);
     if (settled)
-      await c.query("UPDATE outbox SET state='processed' WHERE id=$1", [
-        job.id,
-      ]);
+      await c.query(
+        "UPDATE outbox SET state='processed',locked_until=NULL,last_error=NULL WHERE id=$1",
+        [job.id],
+      );
+    else if (failed && current.attempts + 1 >= JOB_ATTEMPT_LIMIT)
+      // Dead-letter for human review. Funds are never reported as returned.
+      await c.query(
+        "UPDATE outbox SET state='dead',attempts=attempts+1,dead_at=now(),locked_until=NULL,last_error=$2 WHERE id=$1",
+        [job.id, error ?? "RECONCILIATION_FAILED"],
+      );
     else
       await c.query(
-        "UPDATE outbox SET attempts=attempts+1,available_at=now()+($2::integer * interval '1 second') WHERE id=$1",
-        [job.id, failed ? 30 : 15],
+        "UPDATE outbox SET attempts=attempts+1,locked_until=NULL,last_error=$3,available_at=now()+($2::integer * interval '1 second') WHERE id=$1",
+        [
+          job.id,
+          failed
+            ? Math.min(900, 30 * 2 ** Math.min(current.attempts, 5))
+            : 15,
+          failed ? (error ?? "RECONCILIATION_FAILED") : null,
+        ],
       );
   });
 }
@@ -464,9 +565,14 @@ export async function workerTick() {
         /* Retry on next tick. */
       }
     }
+    // Lease due jobs so a second worker process skips them until the lease
+    // expires; a crashed worker's jobs become claimable again automatically.
     const jobs = (
       await db.query(
-        "SELECT * FROM outbox WHERE state='pending' AND available_at<=now() ORDER BY available_at LIMIT 20",
+        `UPDATE outbox SET locked_until=now()+interval '2 minutes'
+         WHERE id IN (SELECT id FROM outbox WHERE state='pending' AND available_at<=now()
+           AND (locked_until IS NULL OR locked_until<now()) ORDER BY available_at LIMIT 20 FOR UPDATE SKIP LOCKED)
+         RETURNING *`,
       )
     ).rows;
     for (const job of jobs) {
@@ -488,8 +594,12 @@ export async function workerTick() {
           if (pay.state === "completed") await refundPayment(pay);
         }
         await finishCancellation(job);
-      } catch {
-        await finishCancellation(job, true);
+      } catch (e) {
+        await finishCancellation(
+          job,
+          true,
+          String((e as Error)?.message ?? "RECONCILIATION_FAILED").slice(0, 200),
+        );
       }
     }
   } finally {

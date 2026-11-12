@@ -26,6 +26,20 @@ export const Contracts = {
         .max(6),
       timeStart: z.iso.datetime(),
       timeEnd: z.iso.datetime(),
+      stepFree: z.boolean().optional(),
+      neighborhoods: z.array(z.string().max(40)).max(10).optional(),
+      timezone: z
+        .string()
+        .max(64)
+        .refine((tz) => {
+          try {
+            new Intl.DateTimeFormat("en-US", { timeZone: tz });
+            return true;
+          } catch {
+            return false;
+          }
+        }, "Unknown time zone")
+        .optional(),
     })
     .refine(
       (b) =>
@@ -53,74 +67,123 @@ const contractPaths: Record<string, [string, keyof typeof Contracts]> = {
   "/purchases": ["post", "Purchase"],
   "/payments/orders": ["post", "Order"],
 };
-export const openapi = {
-  openapi: "3.1.0",
-  info: {
-    title: "BaePal implemented core mutations",
-    version: "0.1.0",
-    description:
-      "Generated request schemas from the Zod validators used by these routes. This document covers core mutations only; see docs/API.md for the complete implemented route inventory. No claim of complete response-schema coverage.",
+const errorRef = {
+  content: {
+    "application/json": { schema: { $ref: "#/components/schemas/Error" } },
   },
-  servers: [{ url: "/api/v1" }],
-  paths: Object.fromEntries(
-    Object.entries(contractPaths).map(([path, [method, contract]]) => [
-      path,
-      {
-        [method]: {
-          summary: contract,
-          security: path.startsWith("/auth/")
-            ? []
+};
+const PUBLIC = /^\/(health|ready|config|openapi\.json|time\/resolve|auth\/(signup|login|password\/request|password\/reset)|webhooks\/paypal)$/;
+// Built from the routes Fastify actually registered, so the inventory cannot
+// drift from the implementation. Request schemas come from the same Zod
+// validators the handlers use.
+export function buildOpenApi(routes: { method: string; url: string }[]) {
+  const paths: Record<string, Record<string, unknown>> = {};
+  for (const { method, url } of routes) {
+    if (!url.startsWith("/api/v1/") || method === "HEAD") continue;
+    const path = url.slice(7).replace(/:(\w+)/g, "{$1}");
+    const params = [...path.matchAll(/\{(\w+)\}/g)].map((m) => ({
+      in: "path",
+      name: m[1],
+      required: true,
+      schema:
+        m[1] === "provider"
+          ? { type: "string", enum: ["github", "linkedin"] }
+          : { type: "string", format: "uuid" },
+    }));
+    const lower = method.toLowerCase();
+    const known = contractPaths[path];
+    const contract = known && known[0] === lower ? known[1] : null;
+    const isPublic = PUBLIC.test(path);
+    paths[path] = {
+      ...paths[path],
+      [lower]: {
+        operationId: `${lower}_${path.replace(/[{}]/g, "").replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_|_$/g, "")}`,
+        security: isPublic
+          ? []
+          : lower === "get"
+            ? [{ session: [] }]
             : [{ session: [], csrf: [] }],
-          ...(path.includes("{id}")
-            ? {
-                parameters: [
-                  {
-                    in: "path",
-                    name: "id",
-                    required: true,
-                    schema: { type: "string", format: "uuid" },
+        ...(params.length ? { parameters: params } : {}),
+        ...(contract
+          ? {
+              requestBody: {
+                required: true,
+                content: {
+                  "application/json": {
+                    schema: { $ref: `#/components/schemas/${contract}` },
                   },
-                ],
-              }
-            : {}),
-          requestBody: {
-            required: true,
+                },
+              },
+            }
+          : {}),
+        responses: {
+          "200": {
+            description:
+              "Envelope {data}. Ownership redaction applies; see docs/RESPONSE_PRIVACY.md.",
             content: {
               "application/json": {
-                schema: { $ref: `#/components/schemas/${contract}` },
+                schema: { $ref: "#/components/schemas/Envelope" },
               },
             },
           },
-          responses: {
-            "200": {
-              description:
-                "JSON envelope {data: ...}; resource-specific ownership redaction applies.",
-            },
-            "400": { description: "Schema validation failed" },
-            "401": { description: "Session missing or expired" },
-            "403": { description: "Origin/CSRF/role denied" },
-            "404": { description: "Unavailable resource" },
-            "409": { description: "Version or consent conflict" },
-            "422": { description: "Business constraint" },
-            "429": { description: "Rate limited" },
-            "503": {
-              description: "Provider unavailable; retry the same operation",
+          "400": { description: "Validation failed", ...errorRef },
+          ...(isPublic
+            ? {}
+            : {
+                "401": { description: "Session missing or expired", ...errorRef },
+                "403": { description: "Origin, CSRF, role or step-up denied", ...errorRef },
+              }),
+          "404": { description: "Unavailable (also used to avoid revealing existence)", ...errorRef },
+          "409": { description: "Version, state or consent conflict", ...errorRef },
+          "422": { description: "Business constraint", ...errorRef },
+          "429": { description: "Rate limited", ...errorRef },
+        },
+      },
+    };
+  }
+  return {
+    openapi: "3.1.0",
+    info: {
+      title: "BaePal API",
+      version: "0.2.0",
+      description:
+        "Every registered /api/v1 route. Request bodies for core mutations come from the handlers' Zod validators; other routes validate inline with Zod and return 400 VALIDATION on mismatch. Responses use the {data} envelope or the Error schema.",
+    },
+    servers: [{ url: "/api/v1" }],
+    paths,
+    components: {
+      securitySchemes: {
+        session: { type: "apiKey", in: "cookie", name: "baepal" },
+        csrf: { type: "apiKey", in: "header", name: "x-csrf-token" },
+      },
+      schemas: {
+        Envelope: {
+          type: "object",
+          required: ["data"],
+          properties: { data: {}, nextCursor: { type: ["string", "null"] } },
+        },
+        Error: {
+          type: "object",
+          required: ["error"],
+          properties: {
+            error: {
+              type: "object",
+              required: ["code", "message"],
+              properties: {
+                code: { type: "string" },
+                message: { type: "string" },
+                requestId: { type: "string" },
+              },
             },
           },
         },
+        ...Object.fromEntries(
+          Object.entries(Contracts).map(([name, schema]) => [
+            name,
+            z.toJSONSchema(schema, { io: "input" }),
+          ]),
+        ),
       },
-    ]),
-  ),
-  components: {
-    securitySchemes: {
-      session: { type: "apiKey", in: "cookie", name: "baepal" },
-      csrf: { type: "apiKey", in: "header", name: "x-csrf-token" },
     },
-    schemas: Object.fromEntries(
-      Object.entries(Contracts).map(([name, schema]) => [
-        name,
-        z.toJSONSchema(schema, { io: "input" }),
-      ]),
-    ),
-  },
-};
+  };
+}
