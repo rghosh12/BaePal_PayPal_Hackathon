@@ -1337,15 +1337,27 @@ export async function buildApp() {
       next(new Error("Session unavailable"));
     }
   });
+  // Socket event data can occupy the optional callback position. Only invoke
+  // actual acknowledgement functions; transport failures must not reject an
+  // async listener after a message has already been persisted.
+  const acknowledgeSocket = (callback: unknown, response: unknown) => {
+    if (typeof callback !== "function") return;
+    try {
+      callback(response);
+    } catch {
+      // Keep persistence independent of acknowledgement delivery. A retry uses
+      // the original clientMessageId and returns the existing saved message.
+    }
+  };
   io.on("connection", (socket) => {
     socket.on("conversation.subscribe", async (mid, ack) => {
       try {
         const s = await authenticate(socket.data.sessionToken);
         await activeMatch(db, id.parse(mid), s.user_id);
         await socket.join(`match:${mid}`);
-        ack?.({ ok: true });
+        acknowledgeSocket(ack, { ok: true });
       } catch {
-        ack?.({ error: "Conversation unavailable" });
+        acknowledgeSocket(ack, { error: "Conversation unavailable" });
       }
     });
     socket.on("message.send", async (input, ack) => {
@@ -1365,9 +1377,9 @@ export async function buildApp() {
           b.clientMessageId,
         );
         await broadcastMessage(m);
-        ack?.({ data: m });
+        acknowledgeSocket(ack, { data: m });
       } catch {
-        ack?.({ error: "Message could not be sent" });
+        acknowledgeSocket(ack, { error: "Message could not be sent" });
       }
     });
   });
