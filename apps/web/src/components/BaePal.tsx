@@ -77,6 +77,7 @@ export default function BaePal() {
     [data, setData] = useState<any>(null),
     [matches, setMatches] = useState<Row[]>([]),
     [error, setError] = useState(""),
+    [undoable, setUndoable] = useState(false),
     [notice, setNotice] = useState(""),
     [loading, setLoading] = useState(true),
     [busy, setBusy] = useState(false),
@@ -1527,6 +1528,18 @@ export default function BaePal() {
             "A little curiosity goes a long way.",
             "Meet someone who makes you want to know more.",
           )}
+          {undoable &&
+            !config.hosted &&
+            button(
+              "Undo last pass",
+              async () => {
+                setUndoable(false);
+                await api("/decisions/undo", "POST", {});
+                setNotice("Undone. They're back in your queue.");
+                await refresh();
+              },
+              "secondary",
+            )}
           <Link href="/profile/edit" className="button secondary">
             <SlidersHorizontal size={17} />
             Preferences
@@ -1557,6 +1570,8 @@ export default function BaePal() {
                         action: "pass",
                         clientMutationId: crypto.randomUUID(),
                       });
+                      setNotice("Passed. Changed your mind? Undo within 10 minutes.");
+                      setUndoable(true);
                       await refresh();
                     })
                   }
@@ -2186,11 +2201,31 @@ export default function BaePal() {
                     });
                     await refresh();
                   })}
+                {!closed &&
+                  !config.hosted &&
+                  p.status === "proposed" &&
+                  !p.acceptedByYou &&
+                  button(
+                    "Not this one",
+                    async () => {
+                      await api(`/date-plans/${p.id}/decline`, "POST", {
+                        proposalVersion: p.version,
+                      });
+                      setNotice("Declined. Your match can suggest another idea.");
+                      await refresh();
+                    },
+                    "secondary",
+                  )}
                 {p.acceptedByYou && (
                   <p className="saved">
                     <Check size={17} />
                     You accepted this version.
                   </p>
+                )}
+                {p.status === "confirmed" && !config.hosted && (
+                  <a className="button secondary" href={`/api/v1/date-plans/${p.id}/calendar.ics`}>
+                    Add to calendar
+                  </a>
                 )}
                 {p.acceptanceCount === 2 &&
                   proposal.snapshot.price_cents > 0 &&
@@ -2641,6 +2676,10 @@ export default function BaePal() {
           "Reporters stay anonymous. Budgets, messages and payment details are not shown here. Every action needs a reason and is audited.",
         )}
         <div className="panel">
+          <label>
+            Your password (required to suspend or restore an account)
+            <input id="staff-password" type="password" autoComplete="current-password" />
+          </label>
           {Array.isArray(data) && data.length === 0 && (
             <p>No reports right now.</p>
           )}
@@ -2655,10 +2694,18 @@ export default function BaePal() {
                       setNotice("A reason of at least 5 characters is required.");
                       return;
                     }
+                    const password = (
+                      document.getElementById("staff-password") as HTMLInputElement | null
+                    )?.value;
+                    if (["suspend", "restore"].includes(action) && !password) {
+                      setNotice("Enter your password above to suspend or restore an account.");
+                      return;
+                    }
                     await api(`/admin/reports/${r.id}`, "PATCH", {
                       action,
                       reason,
                       expectedVersion: r.version,
+                      ...(password ? { password } : {}),
                     });
                     setNotice(`Recorded: ${label.toLowerCase()}.`);
                     await refresh();

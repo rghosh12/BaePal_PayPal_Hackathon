@@ -106,6 +106,12 @@ AI_API_KEY=<your key>
 5. **Log in with PayPal**, for the Verified by PayPal badge. In your Sandbox app's **Features**, enable **Log in with PayPal**. Then set the **Return URL** to `<APP_ORIGIN>/api/v1/auth/paypal/callback`, for example `https://baepal-web.onrender.com/api/v1/auth/paypal/callback`. Under the information requested, tick **Email** and **PayPal account verification status**. Use the HTTPS Render URL if PayPal rejects `localhost`.
 6. **Payouts** (for the no-show payout) are normally enabled on Sandbox business accounts. If a claim fails with a permission error, enable Payouts for the app in the dashboard.
 
+### Optional keys
+
+- **Real email** (verification codes, password resets, hourly update emails): `EMAIL_MODE=resend`, `EMAIL_API_KEY=<Resend key>` and `EMAIL_FROM=<address on a verified domain>`. Without these, emails are written to `.data/mail/`.
+- **GitHub profile connection**: create an OAuth app at <https://github.com/settings/developers> with the callback `<APP_ORIGIN>/api/v1/auth/github/callback`, then set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`. LinkedIn works the same way, with the callback `.../auth/linkedin/callback` and the "Sign In with LinkedIn using OpenID Connect" product.
+- **Manual photo review**: `MEDIA_MODERATION=manual` holds new photos for a moderator instead of auto-approving them (auto-approval is labelled as such).
+
 ### Verify your keys (no money moves)
 
 ```bash
