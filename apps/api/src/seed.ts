@@ -131,6 +131,60 @@ await tx(async (c) => {
       ],
     );
   }
+  const modEmail = "moderator@demo.baepal.invalid";
+  if (
+    !(await c.query("SELECT 1 FROM users WHERE email=$1", [modEmail])).rowCount
+  ) {
+    const id = randomUUID();
+    await c.query(
+      "INSERT INTO users(id,email,password_hash,status,role,confirmed_at) VALUES($1,$2,$3,'active','moderator',now())",
+      [id, modEmail, password],
+    );
+    await c.query(
+      "INSERT INTO profile_private(user_id,birth_date,gender,genders) VALUES($1,'1985-03-01','Nonbinary',$2)",
+      [id, ["Woman", "Man", "Nonbinary"]],
+    );
+    await c.query(
+      "INSERT INTO profiles(user_id,display_name,bio,interests,prompts,photos) VALUES($1,'Robin (BaePal safety)','Fictional demo moderator. Staff accounts never appear in Discover.','{}','[]','{}')",
+      [id],
+    );
+  }
+  const userId = async (name: string) =>
+    (
+      await c.query("SELECT id FROM users WHERE email=$1", [
+        `${name}@demo.baepal.invalid`,
+      ])
+    ).rows[0].id as string;
+  // Fixtures for the moderation queue and safety flows.
+  if (!(await c.query("SELECT 1 FROM reports")).rowCount)
+    for (const [reporter, subject, category, notes] of [
+      [
+        "sam",
+        "parker",
+        "spam/scam",
+        "Asked me to move to another app and buy a gift card before we met.",
+      ],
+      [
+        "reese",
+        "finley",
+        "harassment",
+        "Kept messaging after I said I wasn't interested.",
+      ],
+    ])
+      await c.query(
+        "INSERT INTO reports(id,reporter_id,subject_id,category,notes) VALUES($1,$2,$3,$4,$5)",
+        [
+          randomUUID(),
+          await userId(reporter),
+          await userId(subject),
+          category,
+          notes,
+        ],
+      );
+  await c.query(
+    "INSERT INTO blocks(actor_id,target_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
+    [await userId("avery"), await userId("emerson")],
+  );
   // A few incoming likes so the Likes inbox has content in the demo.
   for (const [actor, target] of [
     ["riley", "alex"],
@@ -243,6 +297,6 @@ await tx(async (c) => {
     );
 });
 console.log(
-  "Seeded 16 fictional adults. Local demo password is documented in README.",
+  "Seeded 16 fictional adults, a demo moderator, two open reports and one block. Local demo password is documented in README.",
 );
 await db.end();

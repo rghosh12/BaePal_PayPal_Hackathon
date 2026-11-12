@@ -1510,10 +1510,16 @@ export async function buildApp() {
     const s = await session(r);
     if (!["admin", "moderator"].includes(s.role))
       return fail(403, "ROLE_REQUIRED", "Moderator access required.");
+    // Minimal evidence only: the reporter stays anonymous, and budgets,
+    // messages and payment details are never joined in.
     return ok(
       (
         await db.query(
-          "SELECT id,category,state,created_at FROM reports ORDER BY created_at DESC LIMIT 100",
+          `SELECT r.id,r.category,r.notes,r.state,r.action,r.version,r.created_at,
+             r.subject_id,p.display_name AS subject_name,u.status AS subject_status,
+             (SELECT count(*)::int FROM reports o WHERE o.subject_id=r.subject_id) AS subject_report_count
+           FROM reports r JOIN users u ON u.id=r.subject_id LEFT JOIN profiles p ON p.user_id=r.subject_id
+           ORDER BY (r.state='open') DESC, r.created_at DESC LIMIT 100`,
         )
       ).rows,
     );
@@ -1524,22 +1530,106 @@ export async function buildApp() {
       return fail(403, "ROLE_REQUIRED", "Moderator access required.");
     const b = body(
       r,
-      z.object({
-        state: z.enum(["reviewed", "dismissed"]),
-        reason: z.string().min(5).max(1000),
-      }),
+      z
+        .object({
+          action: z
+            .enum(["dismiss", "warn", "suspend", "restore", "escalate"])
+            .optional(),
+          state: z.enum(["reviewed", "dismissed"]).optional(),
+          reason: z.string().min(5).max(1000),
+          expectedVersion: z.number().int().min(0).optional(),
+        })
+        .refine((x) => x.action || x.state, "Choose a moderation action."),
     );
-    await tx(async (c) => {
-      await c.query("UPDATE reports SET state=$2 WHERE id=$1", [
-        param(r),
-        b.state,
-      ]);
+    const action = b.action ?? (b.state === "dismissed" ? "dismiss" : null);
+    const subject = await tx(async (c) => {
+      const report = await one(
+        c,
+        "SELECT * FROM reports WHERE id=$1 FOR UPDATE",
+        [param(r)],
+      );
+      if (!report) return fail(404, "NOT_FOUND", "Report not found.");
+      if (
+        b.expectedVersion !== undefined &&
+        report.version !== b.expectedVersion
+      )
+        return fail(
+          409,
+          "VERSION_CONFLICT",
+          "Another moderator updated this report. Refresh first.",
+        );
+      const target = await one(
+        c,
+        "SELECT id,role,status FROM users WHERE id=$1 FOR UPDATE",
+        [report.subject_id],
+      );
+      if (
+        ["suspend", "restore"].includes(action ?? "") &&
+        target.role !== "member"
+      )
+        return fail(
+          403,
+          "ROLE_REQUIRED",
+          "Staff accounts are managed outside the report queue.",
+        );
+      if (action === "suspend") {
+        await c.query(
+          "UPDATE users SET status='suspended' WHERE id=$1 AND status IN ('active','paused','onboarding')",
+          [target.id],
+        );
+        await c.query("DELETE FROM sessions WHERE user_id=$1", [target.id]);
+      } else if (action === "restore")
+        await c.query(
+          "UPDATE users SET status='active' WHERE id=$1 AND status='suspended'",
+          [target.id],
+        );
+      else if (action === "warn")
+        await notify(
+          c,
+          [target.id],
+          `warning:${report.id}:${report.version + 1}`,
+          "account.warning",
+          null,
+        );
+      const state =
+        action === "dismiss"
+          ? "dismissed"
+          : action === "escalate"
+            ? "open"
+            : "reviewed";
+      await c.query(
+        "UPDATE reports SET state=$2,action=$3,version=version+1,updated_at=now() WHERE id=$1",
+        [report.id, state, action],
+      );
       await c.query(
         "INSERT INTO audit_log(id,actor_id,action,resource_id,reason) VALUES($1,$2,$3,$4,$5)",
-        [randomUUID(), s.user_id, `report.${b.state}`, param(r), b.reason],
+        [
+          randomUUID(),
+          s.user_id,
+          `report.${action ?? state}`,
+          report.id,
+          b.reason,
+        ],
       );
+      return action === "suspend" ? target.id : null;
     });
+    if (subject) {
+      io.to(`user:${subject}`).emit("access.revoked", {});
+      io.in(`user:${subject}`).disconnectSockets(true);
+    }
     return ok({ updated: true });
+  });
+  // Reporters see neutral progress only, never the action taken.
+  app.get("/api/v1/reports", async (r) => {
+    const s = await member(r);
+    return ok(
+      (
+        await db.query(
+          "SELECT id,category,created_at,CASE WHEN state='open' THEN 'received' ELSE 'closed' END AS progress FROM reports WHERE reporter_id=$1 ORDER BY created_at DESC LIMIT 50",
+          [s.user_id],
+        )
+      ).rows,
+    );
   });
   io.use(async (socket, next) => {
     try {

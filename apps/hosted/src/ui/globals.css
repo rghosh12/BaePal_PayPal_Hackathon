@@ -2133,3 +2133,5 @@ code {
 
 .slot-picker { display: grid; gap: 0.3rem; margin: 0.6rem 0; font-size: 0.9rem; }
 .slot-picker select { max-width: 22rem; }
+
+.moderation-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }

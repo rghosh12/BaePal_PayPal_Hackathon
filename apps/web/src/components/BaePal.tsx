@@ -404,6 +404,9 @@ export default function BaePal() {
       ? []
       : [{ href: "/notifications", label: "Updates", Icon: Bell }]),
     { href: "/profile", label: "Profile", Icon: UserRound },
+    ...(["moderator", "admin"].includes(me?.role)
+      ? [{ href: "/admin/reports", label: "Reports", Icon: ShieldCheck }]
+      : []),
   ];
   useEffect(() => {
     if (path !== "/notifications" || !updates?.unread) return;
@@ -2513,30 +2516,62 @@ export default function BaePal() {
   } else if (path === "/admin/reports") {
     content = (
       <>
-        {heading("RESTRICTED WORKSPACE", "Report queue.")}
+        {heading(
+          "RESTRICTED WORKSPACE",
+          "Report queue.",
+          "Reporters stay anonymous. Budgets, messages and payment details are not shown here. Every action needs a reason and is audited.",
+        )}
         <div className="panel">
+          {Array.isArray(data) && data.length === 0 && (
+            <p>No reports right now.</p>
+          )}
           {Array.isArray(data) &&
-            data.map((r: Row) => (
-              <div className="suggestion" key={r.id}>
-                <div>
-                  <h3>{r.category}</h3>
-                  <p>{r.state}</p>
-                  {button(
-                    "Mark reviewed",
-                    async () => {
-                      const reason = prompt("Reason for marking reviewed");
-                      if (!reason) return;
-                      await api(`/admin/reports/${r.id}`, "PATCH", {
-                        state: "reviewed",
-                        reason,
-                      });
-                      await refresh();
-                    },
-                    "secondary",
-                  )}
+            data.map((r: Row) => {
+              const moderate = (action: string, label: string) =>
+                button(
+                  label,
+                  async () => {
+                    const reason = prompt(`Reason to ${label.toLowerCase()}`);
+                    if (!reason || reason.trim().length < 5) {
+                      setNotice("A reason of at least 5 characters is required.");
+                      return;
+                    }
+                    await api(`/admin/reports/${r.id}`, "PATCH", {
+                      action,
+                      reason,
+                      expectedVersion: r.version,
+                    });
+                    setNotice(`Recorded: ${label.toLowerCase()}.`);
+                    await refresh();
+                  },
+                  "secondary",
+                );
+              return (
+                <div className="suggestion" key={r.id}>
+                  <div>
+                    <h3>
+                      {r.category} · about {r.subject_name || "a member"}
+                    </h3>
+                    <p>
+                      <span className="pill">{r.state}</span>{" "}
+                      {r.action && <span className="pill">{r.action}</span>}{" "}
+                      Account: {r.subject_status} · {r.subject_report_count}{" "}
+                      report{r.subject_report_count === 1 ? "" : "s"} total ·{" "}
+                      {new Date(r.created_at).toLocaleString()}
+                    </p>
+                    {r.notes && <blockquote>{r.notes}</blockquote>}
+                    <div className="moderation-actions">
+                      {moderate("dismiss", "Dismiss")}
+                      {moderate("warn", "Warn")}
+                      {r.subject_status === "suspended"
+                        ? moderate("restore", "Restore")
+                        : moderate("suspend", "Suspend")}
+                      {moderate("escalate", "Escalate")}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
         </div>
       </>
     );

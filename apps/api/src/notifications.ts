@@ -8,6 +8,8 @@ export const NOTIFICATION_TITLES: Record<string, string> = {
   "date.confirmed": "A date plan is confirmed.",
   "payment.completed": "Your PayPal payment completed.",
   "refund.completed": "Your PayPal refund completed.",
+  "account.warning":
+    "BaePal safety reviewed a report about your account. Please review our community guidelines.",
 };
 
 // Replays of the same domain event map to the same event_id, so the

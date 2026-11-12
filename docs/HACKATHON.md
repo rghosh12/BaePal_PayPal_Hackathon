@@ -63,6 +63,11 @@ pnpm dev                               # web http://localhost:3000 · API :4000
 
 Use **Continue as Alex** in one browser window and **Continue as Jordan** in a private/incognito window.
 
+Every seeded account uses the password `Demo-Only-2026!`, and every name is fictional. The seed data includes:
+- `moderator@demo.baepal.invalid`, a staff account with a **Reports** queue holding two open reports. Staff accounts never appear in Discover.
+- A blocked pair, Avery and Emerson.
+- Incoming likes for Alex and Jordan, so their **Likes** inbox has content.
+
 ### Turn on real AI
 
 In `.env`:
@@ -115,6 +120,7 @@ It prints no secrets. On startup, the API also logs whether PayPal accepted the 
 5. Propose → both accept the same version.
 6. Each opens **checkout** → **PayPal** button → approve with the Sandbox buyer → the server captures and verifies. After the first ticket, the plan shows `partially_paid`; after the second, it shows `confirmed`.
 7. **Cancel the plan** → refunds go to PayPal; receipts show the refund IDs.
+8. Optional: log in as the moderator and go to **Reports**. You can dismiss, warn, suspend, restore or escalate a report; each action needs a reason and is written to the audit log. Suspending logs the member out immediately, and the reporter only ever sees "received" or "closed".
 
 ## Honest limits
 

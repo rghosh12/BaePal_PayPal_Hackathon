@@ -74,10 +74,13 @@ export async function eligible(
 ) {
   if (a === b) return false;
   const rows = await c.query(
-    `SELECT u.id,u.status,p.city,q.gender,q.genders,q.age_min,q.age_max,q.birth_date FROM users u JOIN profiles p ON p.user_id=u.id JOIN profile_private q ON q.user_id=u.id WHERE u.id=ANY($1::uuid[])`,
+    `SELECT u.id,u.status,u.role,p.city,q.gender,q.genders,q.age_min,q.age_max,q.birth_date FROM users u JOIN profiles p ON p.user_id=u.id JOIN profile_private q ON q.user_id=u.id WHERE u.id=ANY($1::uuid[])`,
     [[a, b]],
   );
-  if (rows.rowCount !== 2 || rows.rows.some((r) => r.status !== "active"))
+  if (
+    rows.rowCount !== 2 ||
+    rows.rows.some((r) => r.status !== "active" || r.role !== "member")
+  )
     return false;
   const [x, y] = rows.rows;
   if (x.city !== y.city) return false;
