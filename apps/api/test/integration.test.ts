@@ -923,6 +923,23 @@ describe("real PostgreSQL access and consent invariants", () => {
       (await req(b, "GET", `/conversations/${m}/messages`)).statusCode,
     ).toBe(404);
   });
+  it("exports the requester's own plans and budget but never the partner's", async () => {
+    const p = await plan();
+    const result = await data(a, "POST", "/me/export", { password });
+    expect(result.datePreferences).toEqual([
+      expect.objectContaining({ plan_id: p.id, budgetCents: 5000 }),
+    ]);
+    expect(result.datePlans.map((d: any) => d.id)).toEqual([p.id]);
+    expect(result.decisions).toEqual([{ target_id: b, action: "like" }]);
+    expect(JSON.stringify(result)).not.toMatch(/budget_encrypted|4000|csrf/);
+    await data(a, "DELETE", "/me", { password });
+    for (const sql of [
+      "SELECT 1 FROM decisions WHERE actor_id=$1 OR target_id=$1",
+      "SELECT 1 FROM notifications WHERE user_id=$1",
+      "SELECT 1 FROM private_date_preferences WHERE user_id=$1",
+    ])
+      expect((await db.query(sql, [a])).rowCount).toBe(0);
+  });
   it("authorizes live socket subscriptions and revokes blocked and logged-out sessions", async () => {
     const mid = await match();
     const address = await app.listen({ port: 0, host: "127.0.0.1" });

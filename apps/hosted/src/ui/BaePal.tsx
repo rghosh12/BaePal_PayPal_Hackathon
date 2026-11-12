@@ -50,6 +50,20 @@ const when = (v: string) =>
     timeStyle: "short",
     timeZone: "America/Los_Angeles",
   }).format(new Date(v)) + " · Seattle time";
+// Half-hour starts that fit the option's window; the server re-validates.
+const startSlots = (x: Row) => {
+  const out: string[] = [];
+  const step = 30 * 60000,
+    soonest = Date.now() + 5 * 60000;
+  let t = Math.ceil(new Date(x.earliestStart).getTime() / step) * step;
+  const last =
+    new Date(x.latestEnd).getTime() - (x.duration_minutes || 0) * 60000;
+  while (t <= last && out.length < 16) {
+    if (t >= soonest) out.push(new Date(t).toISOString());
+    t += step;
+  }
+  return out;
+};
 export default function BaePal() {
   const path = usePathname(),
     router = useRouter();
@@ -71,7 +85,8 @@ export default function BaePal() {
       nonce: number;
     } | null>(null),
     [tagDrafts, setTagDrafts] = useState<Row | null>(null),
-    [updates, setUpdates] = useState<Row | null>(null);
+    [updates, setUpdates] = useState<Row | null>(null),
+    [slotChoice, setSlotChoice] = useState<Record<string, string>>({});
   const csrf = useRef("");
   const configCache = useRef<Row | null>(null);
   const socket = useRef<Socket | null>(null);
@@ -2015,14 +2030,46 @@ export default function BaePal() {
                       {x.duration_minutes} minutes
                     </p>
                     <small>{x.accessibility}</small>
+                    {(() => {
+                      const slots = startSlots(x);
+                      if (slots.length < 2) return null;
+                      return (
+                        <label className="slot-picker">
+                          Start time
+                          <select
+                            value={slotChoice[x.id] || slots[0]}
+                            onChange={(e) =>
+                              setSlotChoice((s) => ({
+                                ...s,
+                                [x.id]: e.target.value,
+                              }))
+                            }
+                          >
+                            {slots.map((s) => (
+                              <option key={s} value={s}>
+                                {when(s)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      );
+                    })()}
                     {button(
-                      "Propose this date",
+                      proposal ? "Propose this instead" : "Propose this date",
                       async () => {
                         await api(`/date-plans/${p.id}/proposals`, "POST", {
                           optionId: x.id,
-                          startsAt: x.earliestStart,
+                          startsAt:
+                            slotChoice[x.id] ||
+                            startSlots(x)[0] ||
+                            x.earliestStart,
                           expectedVersion: p.version,
                         });
+                        setNotice(
+                          proposal
+                            ? "New version proposed. Both people accept again before checkout."
+                            : "Proposed. Your match can accept or suggest a change.",
+                        );
                         await refresh();
                       },
                       "secondary",

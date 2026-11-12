@@ -24,7 +24,7 @@ import { z, ZodError } from "zod";
 import { db, tx, one } from "./db.js";
 import { inbox, matchMembers, notify } from "./notifications.js";
 import { config } from "./config.js";
-import { hash, keyed, token, equal, ageOn } from "./crypto.js";
+import { hash, keyed, token, equal, ageOn, decrypt } from "./crypto.js";
 import {
   AppError,
   fail,
@@ -1413,13 +1413,46 @@ export async function buildApp() {
         [s.user_id],
       )
     ).rows;
+    const rows = async (sql: string) =>
+      (await db.query(sql, [s.user_id])).rows;
+    const datePreferences = (
+      await rows(
+        "SELECT plan_id,budget_encrypted,activities,time_start,time_end FROM private_date_preferences WHERE user_id=$1",
+      )
+    ).map(({ budget_encrypted, ...p }) => ({
+      ...p,
+      budgetCents: Number(decrypt(budget_encrypted)),
+    }));
     return reply.header("Cache-Control", "no-store").send(
       ok({
+        exportedAt: new Date().toISOString(),
         profile,
         privateProfile,
         ownMessages,
+        decisions: await rows(
+          "SELECT target_id,action FROM decisions WHERE actor_id=$1",
+        ),
+        blocks: await rows(
+          "SELECT target_id,created_at FROM blocks WHERE actor_id=$1",
+        ),
+        reportsFiled: await rows(
+          "SELECT id,category,state,created_at FROM reports WHERE reporter_id=$1",
+        ),
+        datePlans: await rows(
+          "SELECT d.id,d.match_id,d.status,d.financial_state,d.version,d.created_at FROM date_plans d JOIN matches m ON m.id=d.match_id WHERE m.low_id=$1 OR m.high_id=$1",
+        ),
+        datePreferences,
+        purchases: await rows(
+          "SELECT id,plan_id,version,amount_cents,currency,state FROM purchases WHERE buyer_id=$1",
+        ),
         payments,
-        note: "Synchronous local export, includes only your messages; no partner private inputs.",
+        refunds: await rows(
+          "SELECT r.id,r.payment_id,r.amount_cents,r.state FROM refunds r JOIN payments p ON p.id=r.payment_id JOIN purchases u ON u.id=p.purchase_id WHERE u.buyer_id=$1",
+        ),
+        notifications: await rows(
+          "SELECT category,read_at,created_at FROM notifications WHERE user_id=$1",
+        ),
+        note: "Includes only data you created or that is about your own account. Partner private inputs (budgets, availability), partner messages, session tokens and moderation notes are excluded.",
       }),
     );
   });
@@ -1448,6 +1481,13 @@ export async function buildApp() {
         [s.user_id],
       );
       await c.query("DELETE FROM private_date_preferences WHERE user_id=$1", [
+        s.user_id,
+      ]);
+      await c.query(
+        "DELETE FROM decisions WHERE actor_id=$1 OR target_id=$1",
+        [s.user_id],
+      );
+      await c.query("DELETE FROM notifications WHERE user_id=$1", [
         s.user_id,
       ]);
       await c.query("UPDATE messages SET text='[deleted]' WHERE sender_id=$1", [

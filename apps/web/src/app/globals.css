@@ -2130,3 +2130,6 @@ code {
 .notification-list li + li { border-top: 1px solid rgba(0, 0, 0, 0.08); }
 .notification-list a { display: flex; justify-content: space-between; gap: 1rem; padding: 0.9rem 1.1rem; color: inherit; text-decoration: none; }
 .notification-list li.unread strong::before { content: "● "; color: #c2410c; }
+
+.slot-picker { display: grid; gap: 0.3rem; margin: 0.6rem 0; font-size: 0.9rem; }
+.slot-picker select { max-width: 22rem; }
