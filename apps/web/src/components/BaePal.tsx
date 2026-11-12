@@ -56,15 +56,32 @@ const urlParam = (key: string) =>
     ? ""
     : new URLSearchParams(window.location.search).get(key) || "";
 // Half-hour starts that fit the option's window; the server re-validates.
+const localMinute = (t: number, timeZone?: string) => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(t));
+  const get = (type: string) =>
+    Number(parts.find((p) => p.type === type)?.value || 0);
+  return get("hour") * 60 + get("minute");
+};
 const startSlots = (x: Row) => {
   const out: string[] = [];
   const step = 30 * 60000,
-    soonest = Date.now() + 5 * 60000;
+    soonest = Date.now() + 5 * 60000,
+    duration = x.duration_minutes || 0;
   let t = Math.ceil(new Date(x.earliestStart).getTime() / step) * step;
-  const last =
-    new Date(x.latestEnd).getTime() - (x.duration_minutes || 0) * 60000;
+  const last = new Date(x.latestEnd).getTime() - duration * 60000;
   while (t <= last && out.length < 16) {
-    if (t >= soonest) out.push(new Date(t).toISOString());
+    const minute = localMinute(t, x.timezone);
+    if (
+      t >= soonest &&
+      minute >= (x.opens_minute ?? 0) &&
+      minute + duration <= (x.closes_minute ?? 1440)
+    )
+      out.push(new Date(t).toISOString());
     t += step;
   }
   return out;
@@ -2150,6 +2167,7 @@ export default function BaePal() {
                           startsAt:
                             slotChoice[x.id] ||
                             startSlots(x)[0] ||
+                            x.firstSlot ||
                             x.earliestStart,
                           expectedVersion: p.version,
                         });
