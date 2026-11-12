@@ -32,7 +32,8 @@ import {
   releaseStaleHolds,
 } from "./deposits.js";
 import { config } from "./config.js";
-import { hash, keyed, token, equal, ageOn, decrypt } from "./crypto.js";
+import { hash, keyed, token, equal, ageOn, decrypt, encrypt } from "./crypto.js";
+import { authorizeUrl, identityFromCode } from "./providers/paypal-identity.js";
 import {
   AppError,
   fail,
@@ -516,6 +517,84 @@ export async function buildApp() {
     io.in(`session:${s.token_hash}`).disconnectSockets(true);
     reply.clearCookie("baepal", { path: "/" });
     return ok({ loggedOut: true });
+  });
+  // Log in with PayPal (identity link). Mock mode links a labelled mock
+  // identity so the badge can be demonstrated without credentials.
+  app.get("/api/v1/auth/paypal/start", async (r, reply) => {
+    const s = await member(r);
+    if (config.PAYPAL_MODE !== "sandbox") {
+      await db.query(
+        "INSERT INTO paypal_identities(user_id,payer_id,verified,email_encrypted,mode) VALUES($1,$2,true,NULL,'mock') ON CONFLICT(user_id) DO UPDATE SET verified=true,linked_at=now()",
+        [s.user_id, `MOCK-PAYER-${s.user_id.slice(0, 8)}`],
+      );
+      return reply.redirect(`${config.APP_ORIGIN}/profile?paypal=linked`);
+    }
+    if (!config.PAYPAL_CLIENT_ID)
+      return fail(503, "PAYPAL_NOT_CONFIGURED", "PayPal is not configured.");
+    const state = token();
+    reply.setCookie("baepal_pp_state", hash(state + s.user_id), {
+      httpOnly: true,
+      secure: config.APP_ORIGIN.startsWith("https:"),
+      sameSite: "lax",
+      path: "/api/v1/auth/paypal",
+      maxAge: 600,
+    });
+    return reply.redirect(authorizeUrl(state));
+  });
+  app.get("/api/v1/auth/paypal/callback", async (r, reply) => {
+    const back = (status: string) =>
+      reply
+        .clearCookie("baepal_pp_state", { path: "/api/v1/auth/paypal" })
+        .redirect(`${config.APP_ORIGIN}/profile?paypal=${status}`);
+    const s = await member(r).catch(() => null);
+    const q = z
+      .object({ code: z.string().max(2048).optional(), state: z.string().max(200).optional() })
+      .passthrough()
+      .parse(r.query);
+    const expected = r.cookies.baepal_pp_state;
+    if (
+      !s ||
+      !q.code ||
+      !q.state ||
+      !expected ||
+      !equal(hash(q.state + s.user_id), expected)
+    )
+      return back("failed");
+    try {
+      const id = await identityFromCode(q.code);
+      const taken = await one(
+        db,
+        "SELECT user_id FROM paypal_identities WHERE payer_id=$1 AND user_id<>$2",
+        [id.payerId, s.user_id],
+      );
+      if (taken) return back("in-use");
+      await db.query(
+        "INSERT INTO paypal_identities(user_id,payer_id,verified,email_encrypted,mode) VALUES($1,$2,$3,$4,'sandbox') ON CONFLICT(user_id) DO UPDATE SET payer_id=EXCLUDED.payer_id,verified=EXCLUDED.verified,email_encrypted=EXCLUDED.email_encrypted,mode='sandbox',linked_at=now()",
+        [s.user_id, id.payerId, id.verified, id.email ? encrypt(id.email) : null],
+      );
+      return back(id.verified ? "linked" : "unverified");
+    } catch (e) {
+      r.log.warn({ err: (e as Error).message }, "paypal identity link failed");
+      return back("failed");
+    }
+  });
+  app.get("/api/v1/me/paypal", async (r) => {
+    const s = await member(r);
+    const row = await one(
+      db,
+      "SELECT verified,mode,linked_at,email_encrypted IS NOT NULL AS has_email FROM paypal_identities WHERE user_id=$1",
+      [s.user_id],
+    );
+    return ok(
+      row
+        ? { linked: true, verified: row.verified, mode: row.mode, linkedAt: row.linked_at, payoutEmailOnFile: row.has_email }
+        : { linked: false, mode: config.PAYPAL_MODE },
+    );
+  });
+  app.delete("/api/v1/me/paypal", async (r) => {
+    const s = await member(r);
+    await db.query("DELETE FROM paypal_identities WHERE user_id=$1", [s.user_id]);
+    return ok({ linked: false });
   });
   app.get("/api/v1/me", async (r) => {
     const s = await session(r);
@@ -1131,6 +1210,101 @@ export async function buildApp() {
       });
     },
   );
+  // AI date agent: picks from options that already fit both private budgets,
+  // proposes it at the first valid slot and accepts on behalf of the member who
+  // asked. The partner must still accept, and each member approves their own
+  // PayPal payment; the agent never spends without that approval.
+  app.post(
+    "/api/v1/date-plans/:id/agent-book",
+    { config: { rateLimit: { max: 10, timeWindow: "1 hour" } } },
+    async (r) => {
+      const s = await member(r);
+      const p0 = await planFor(db, param(r), s.user_id);
+      const available = await options(db, p0.id);
+      if (!available.length)
+        return fail(
+          409,
+          "NO_SHARED_OPTION",
+          "Nothing fits both private budgets and times right now. Try widening your window.",
+        );
+      const pair = await one(
+        db,
+        "SELECT a.interests AS a, b.interests AS b FROM matches m JOIN profiles a ON a.user_id=m.low_id JOIN profiles b ON b.user_id=m.high_id WHERE m.id=$1",
+        [p0.match_id],
+      );
+      const sharedInterests: string[] = (pair?.a || []).filter((i: string) =>
+        (pair?.b || []).includes(i),
+      );
+      const planned = await planDates({ sharedInterests, eligibleOptions: available });
+      const pick = planned.ranked
+        .map((x) => ({ ...available.find((o) => o.id === x.id)!, reason: x.reason }))
+        .find((x) => x.id);
+      if (!pick) return fail(409, "NO_SHARED_OPTION", "No option could be chosen.");
+      const step = 30 * 60000;
+      const startMs =
+        Math.ceil(
+          Math.max(new Date(pick.earliestStart).getTime(), Date.now() + 10 * 60000) / step,
+        ) * step;
+      if (startMs + pick.duration_minutes * 60000 > new Date(pick.latestEnd).getTime())
+        return fail(409, "NO_SHARED_OPTION", "No time slot fits both windows.");
+      const startsAt = new Date(startMs).toISOString();
+      const result = await tx(async (c) => {
+        const p = await planFor(c, param(r), s.user_id, true);
+        if (p.version !== p0.version)
+          return fail(409, "VERSION_CONFLICT", "This plan changed. Refresh and try again.");
+        assertPlanningOpen(p);
+        if (
+          (
+            await c.query(
+              "SELECT 1 FROM payments pay JOIN purchases u ON u.id=pay.purchase_id WHERE u.plan_id=$1",
+              [p.id],
+            )
+          ).rowCount
+        )
+          return fail(409, "PAYMENT_EXISTS", "Cancel the existing plan before changing a checkout.");
+        const version = p.version + 1;
+        await c.query(
+          "INSERT INTO proposals(plan_id,version,catalogue_id,starts_at,snapshot) VALUES($1,$2,$3,$4,$5)",
+          [p.id, version, pick.id, startsAt, JSON.stringify(catalogueSnapshot(pick))],
+        );
+        await c.query("UPDATE date_plans SET version=$2,status='proposed' WHERE id=$1", [
+          p.id,
+          version,
+        ]);
+        await c.query("INSERT INTO acceptances VALUES($1,$2,$3) ON CONFLICT DO NOTHING", [
+          p.id,
+          version,
+          s.user_id,
+        ]);
+        await notify(
+          c,
+          (await matchMembers(c, p.match_id)).filter((u) => u !== s.user_id),
+          `proposal:${p.id}:${version}`,
+          "date.proposed",
+          p.match_id,
+        );
+        const ai = aiDescriptor();
+        return ok({
+          version,
+          option: { id: pick.id, title: pick.title, price_cents: pick.price_cents },
+          startsAt,
+          reason: pick.reason,
+          source: planned.source,
+          model: planned.source === "model" ? ai.model : null,
+          steps: [
+            `Filtered ${available.length} option(s) that fit both private budgets and time windows.`,
+            planned.source === "model"
+              ? `${ai.model} ranked them using only shared public interests.`
+              : "Ranked deterministically (no AI model configured).",
+            `Proposed "${pick.title}" and accepted it for you.`,
+            "Waiting for your match to accept. Then each of you approves your own PayPal ticket.",
+          ],
+        });
+      });
+      await releaseStaleHolds(param(r)).catch((e) => r.log.warn(e, "hold release deferred"));
+      return result;
+    },
+  );
   app.post("/api/v1/date-plans/:id/proposals", async (r) => {
     const s = await member(r);
     const b = body(r, Contracts.Proposal);
@@ -1532,6 +1706,9 @@ export async function buildApp() {
         [s.user_id],
       );
       await c.query("DELETE FROM notifications WHERE user_id=$1", [
+        s.user_id,
+      ]);
+      await c.query("DELETE FROM paypal_identities WHERE user_id=$1", [
         s.user_id,
       ]);
       await c.query("UPDATE messages SET text='[deleted]' WHERE sender_id=$1", [

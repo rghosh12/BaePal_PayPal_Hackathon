@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { db, one, tx, type Conn } from "./db.js";
 import { config } from "./config.js";
+import { decrypt } from "./crypto.js";
 import { fail, planFor } from "./domain.js";
 import { provider } from "./providers/paypal.js";
 import { matchMembers, notify } from "./notifications.js";
@@ -49,9 +50,15 @@ export async function depositStatus(planId: string, user: string) {
       "SELECT x.recipient_id,x.amount_cents,x.batch_id,x.state FROM deposit_payouts x JOIN date_deposits d ON d.id=x.deposit_id WHERE d.plan_id=$1 AND d.version=$2",
       [p.id, p.version],
     );
+    const linked = await one(
+      c,
+      "SELECT 1 FROM paypal_identities WHERE user_id=$1 AND email_encrypted IS NOT NULL",
+      [user],
+    );
     return {
       amountCents: DEPOSIT_CENTS,
       mode: config.PAYPAL_MODE,
+      payoutEmailOnFile: !!linked,
       eligible: HOLD_STATUSES.includes(p.status),
       demoClock: demoClock(),
       you: own
@@ -220,6 +227,14 @@ export async function claimNoShow(
   planId: string,
   payoutEmail?: string,
 ) {
+  if (!payoutEmail) {
+    const linked = await one(
+      db,
+      "SELECT email_encrypted FROM paypal_identities WHERE user_id=$1 AND email_encrypted IS NOT NULL",
+      [user],
+    );
+    if (linked) payoutEmail = decrypt(linked.email_encrypted);
+  }
   if (config.PAYPAL_MODE === "sandbox" && !payoutEmail)
     return fail(
       422,

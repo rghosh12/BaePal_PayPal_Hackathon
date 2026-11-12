@@ -62,7 +62,9 @@ export async function planFor(
 export async function publicProfile(c: Conn | typeof db, id: string) {
   return one(
     c,
-    `SELECT p.*,date_part('year',age(now(),q.birth_date))::int AS age FROM profiles p JOIN profile_private q ON q.user_id=p.user_id WHERE p.user_id=$1`,
+    `SELECT p.*,date_part('year',age(now(),q.birth_date))::int AS age,
+       EXISTS(SELECT 1 FROM paypal_identities i WHERE i.user_id=p.user_id AND i.verified) AS paypal_verified
+     FROM profiles p JOIN profile_private q ON q.user_id=p.user_id WHERE p.user_id=$1`,
     [id],
   );
 }

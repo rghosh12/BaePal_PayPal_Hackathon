@@ -116,7 +116,10 @@ export default function DepositPanel({
         })}
       {!settled && d.you.checkedIn && d.partner.state === "authorized" && !d.partner.checkedIn && (
         <div className="form-stack">
-          {d.mode === "sandbox" && (
+          {d.mode === "sandbox" && d.payoutEmailOnFile && (
+            <p className="muted">Payout goes to the PayPal account you linked.</p>
+          )}
+          {d.mode === "sandbox" && !d.payoutEmailOnFile && (
             <label>
               PayPal email for your payout
               <input

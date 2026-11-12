@@ -2135,3 +2135,10 @@ code {
 .slot-picker select { max-width: 22rem; }
 
 .moderation-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+
+.ai-agent-log { margin-top: 1rem; padding: 0.9rem 1rem; border-radius: 14px; background: rgba(124, 58, 237, 0.06); }
+.ai-agent-log ol { margin: 0.5rem 0 0 1.1rem; padding: 0; }
+.ai-agent-log li { margin: 0.2rem 0; }
+
+.paypal-badge { display: inline-flex; align-items: center; gap: 0.3rem; margin: 0.25rem 0; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; color: #003087; background: #e8f1ff; }
+.button.paypal-login { background: #ffc439; color: #003087; border-color: #ffc439; }

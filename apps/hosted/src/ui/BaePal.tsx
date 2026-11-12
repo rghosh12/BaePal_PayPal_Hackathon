@@ -418,6 +418,21 @@ export default function BaePal() {
     setUpdates((u) => (u ? { ...u, unread: 0 } : u));
     void api("/notifications/read", "POST", {}).catch(() => undefined);
   }, [path, updates?.unread, api]);
+  useEffect(() => {
+    if (path !== "/profile" || typeof window === "undefined") return;
+    const status = new URLSearchParams(window.location.search).get("paypal");
+    if (!status) return;
+    const messages: Record<string, string> = {
+      linked: "PayPal linked. You now have the Verified by PayPal badge.",
+      unverified:
+        "PayPal linked, but PayPal reports this account as unverified, so no badge is shown.",
+      "in-use": "That PayPal account is already linked to another BaePal member.",
+      failed: "PayPal sign-in didn't complete. Nothing was linked. Please try again.",
+    };
+    if (["failed", "in-use"].includes(status)) setError(messages[status]);
+    else setNotice(messages[status] || "");
+    window.history.replaceState(null, "", "/profile");
+  }, [path]);
   const returnHandled = useRef("");
   useEffect(() => {
     const pay = data?.payment;
@@ -486,6 +501,14 @@ export default function BaePal() {
             <h2>
               {p.display_name}, {p.age}
             </h2>
+            {p.paypal_verified && (
+              <span
+                className="paypal-badge"
+                title="This member linked a PayPal account that PayPal reports as verified."
+              >
+                <ShieldCheck size={13} aria-hidden /> Verified by PayPal
+              </span>
+            )}
             <p>{p.intention}</p>
           </div>
         </div>
@@ -2006,6 +2029,37 @@ export default function BaePal() {
                   },
                   "secondary",
                 )}
+              {!closed &&
+                p.bothPreferences &&
+                !config.hosted &&
+                button("✦ Let the AI agent book it", async () => {
+                  const result = await api(
+                    `/date-plans/${p.id}/agent-book`,
+                    "POST",
+                    {},
+                  );
+                  setNotice(
+                    `AI agent proposed "${result.option.title}" and accepted it for you. Your match just needs to accept.`,
+                  );
+                  await refresh();
+                  setData((d: any) => (d ? { ...d, agent: result } : d));
+                })}
+              {p.agent && (
+                <div className="ai-agent-log">
+                  <strong>
+                    <Sparkles size={15} aria-hidden /> AI date agent
+                    {p.agent.model ? ` · ${p.agent.model}` : " · no AI model ran"}
+                  </strong>
+                  <ol>
+                    {p.agent.steps.map((t: string) => (
+                      <li key={t}>{t}</li>
+                    ))}
+                  </ol>
+                  {p.agent.reason && (
+                    <p className="ai-reason">Why: {p.agent.reason}</p>
+                  )}
+                </div>
+              )}
               {p.suggestions?.map((x: Row) => (
                 <article className="suggestion" key={x.id}>
                   <div className="suggestion-icon">
@@ -2372,6 +2426,42 @@ export default function BaePal() {
         <div className="profile-layout">
           <ProfileCard p={me.profile} />
           <aside className="form-stack">
+            {!config.hosted && (
+              <div className="panel">
+                <span className="eyebrow">TRUST · PAYPAL</span>
+                {me.profile?.paypal_verified ? (
+                  <>
+                    <h2>Verified by PayPal ✓</h2>
+                    <p className="muted">
+                      Your linked PayPal account is verified, and your matches see the badge.
+                      No-show payouts go to this account.
+                    </p>
+                    {button(
+                      "Unlink PayPal",
+                      async () => {
+                        await api("/me/paypal", "DELETE");
+                        setNotice("PayPal unlinked. The badge is removed.");
+                        await refresh();
+                      },
+                      "secondary",
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <h2>Get the Verified by PayPal badge.</h2>
+                    <p className="muted">
+                      Log in with PayPal to show matches you&apos;re a real person with a verified
+                      PayPal account. BaePal only receives your PayPal account ID, the verified
+                      status and your email (kept encrypted, used only for your payouts).
+                      {config.paymentMode !== "sandbox" && " Mock mode: links a demo identity."}
+                    </p>
+                    <a className="button paypal-login" href="/api/v1/auth/paypal/start">
+                      Log in with PayPal
+                    </a>
+                  </>
+                )}
+              </div>
+            )}
             <Link className="button" href="/profile/edit">
               Edit profile & preferences <ArrowUpRight size={17} />
             </Link>
