@@ -27,3 +27,8 @@ apps/web/next-env.d.ts
 .dev.vars*
 integrations/*.local.json
 .secrets/
+
+# Licensed sponsor source and private submission captures
+/vendor/proprietary/
+/recordings/private/
+/submission/private/

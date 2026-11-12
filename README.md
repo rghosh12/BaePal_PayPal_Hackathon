@@ -47,6 +47,8 @@ See [feature gaps and release gates](docs/STATUS.md) before evaluating completen
 
 [Prioritized issues](docs/ISSUES.md) track the remaining specification work. [P0 completion checklist #21](https://github.com/rghosh12/BaePal_PayPal_Hackathon/issues/21) links the release gates.
 
+The [submission package](docs/SUBMISSION_PACKAGE.md) contains the ten-sponsor evidence matrix, model/tool disclosure, hypothetical commercial assumptions and a 2:50 recording storyboard. The [deferred scope policy](docs/DEFERRED_SCOPE.md) records features intentionally outside this prototype.
+
 ## Verification
 
 Create a separate database; the suite refuses database names that do not end in `_test` and truncates only that database.

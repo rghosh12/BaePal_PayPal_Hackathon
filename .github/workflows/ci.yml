@@ -38,6 +38,7 @@ jobs:
           node-version: "24"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: node scripts/check-source-secrets.mjs --self-test && node scripts/check-source-secrets.mjs
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test

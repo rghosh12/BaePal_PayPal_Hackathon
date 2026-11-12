@@ -1,5 +1,7 @@
 # Two-person judge walkthrough
 
+For the prepared under-three-minute narration and shot list, use the [2:50 submission storyboard](SUBMISSION_PACKAGE.md#recording-storyboard-2-minutes-50-seconds). This longer walkthrough is for interactive evaluation. No public video is claimed.
+
 Use a fresh local database and `DEMO_MODE=true`. The illustrations and names are fictional, not photos of real members. Mock mode performs no PayPal calls and must be introduced as such.
 
 1. Start web/API/Postgres using the README. Open two separate browser profiles/contexts, not two tabs sharing cookies. Sign in as Alex and Jordan through the labeled local demo buttons.

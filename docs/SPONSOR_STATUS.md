@@ -1,5 +1,7 @@
 # Sponsor and model execution register
 
+The [submission package](SUBMISSION_PACKAGE.md) supplies the companion ten-sponsor version/license/configuration matrix, reproducible CI references, model/tool disclosure and timed recording storyboard. Both documents distinguish mock-tested gateway code from actual provider execution.
+
 The addendum assigns meaningful prospective roles; it is not evidence that a provider is configured, licensed, approved or executed. Current live hosting is Sites/Cloudflare, not Render. The review UI is native semantic HTML, not AG Grid or AG Studio. The ranking/explanation code is deterministic, not AI/Elastic. The integration hub now provides a configurable gateway contract and explicitly approved previews. No real provider credentials, native model/embedding execution, sponsor SDK or external automation dispatch has been verified.
 
 | Sponsor             | Planned role                                     | Current evidence status | Version / execution evidence                                              | Dependency / issue                                                              |
@@ -8,7 +10,7 @@ The addendum assigns meaningful prospective roles; it is not evidence that a pro
 | Astropods           | Taste/explanation/date agent runtime             | blocked                 | No actual agent, embedding or generative model executed                   | Configured account/model, safe input/output validation; #25                     |
 | Render              | Persistent API, sockets, jobs and database       | planned                 | No Render service deployed; private Sites prototype exists separately     | Account/service plan and callback setup; #27                                    |
 | APIMatic            | Actual PayPal context tooling/client development | blocked                 | No callable APIMatic tool in the selected session; no generated SDK claim | Verify official tooling and record real usage; #28                              |
-| Postman             | Exported/executed happy/negative API collection  | local tooling executed  | Newman 6.2.3: taste plus isolated core/payment collection executed        | Core/taste exports and guarded manual Sandbox workflow; real Sandbox unexecuted |
+| Postman             | Exported/executed happy/negative API collection  | implemented/mock-tested | Newman 6.2.3: taste plus isolated core/payment collection executed        | Core/taste exports and guarded manual Sandbox workflow; real Sandbox unexecuted |
 | AG Grid / AG Studio | Owner-only review/insights/custom widgets        | planned                 | Native review table works; no AG package or Studio award claim            | License/redistribution and actual Studio capabilities; #30                      |
 | Bryntum             | Consent-aware availability/date calendar         | planned                 | No Bryntum component installed/executed                                   | Trial/redistribution and timezone/consent tests; #31                            |
 | Channel3            | Opted-in declared-interest product discovery     | planned                 | No product API execution, affiliate/checkout authority or price claim     | Account, retailer rights and separate consent; #32                              |
