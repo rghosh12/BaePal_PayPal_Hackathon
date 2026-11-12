@@ -21,6 +21,7 @@ All mutations except verified provider webhooks require the exact `Origin: APP_O
 | POST      | /decisions                                   | like/pass with clientMutationId; canonical pair lock and unique reciprocal match                              |
 | GET       | /matches                                     | Current authorized matches plus safe partner public profile                                                   |
 | DELETE    | /matches/:id                                 | Close chat and cancel/reconcile open plans                                                                    |
+| GET       | /conversations/:id/events?after=N            | Node-only participant-authorized metadata event replay, ascending first100 after sequence; schemaVersion1     |
 | GET       | /conversations/:id/messages?after=N          | Participant-only ordered messages, up to 100 per request                                                      |
 | POST      | /conversations/:id/messages                  | Persist once per sender/clientMessageId, sequence and broadcast                                               |
 | POST      | /blocks, /reports                            | Immediate bilateral access revocation; minimal report acknowledgement                                         |
@@ -44,7 +45,9 @@ All mutations except verified provider webhooks require the exact `Origin: APP_O
 
 ## Realtime
 
-Cookie authentication and exact origin are mandatory. `conversation.subscribe(matchId, ack)` authorizes every subscription. `message.send({conversationId,text,clientMessageId}, ack)` uses the same send service as REST. Server events are `message.created`, `match.created`, `access.revoked`. On reconnect, REST `after=sequence` provides catch-up; the current UI reloads the first 100 records, so long-history pagination remains a known limitation. Read receipts, typing, delivery acknowledgements and schema-versioned event envelopes are not implemented.
+Cookie authentication and exact origin are mandatory. `conversation.subscribe(matchId, ack)` authorizes before and after an awaited room join. `message.send({conversationId,text,clientMessageId}, ack)` shares REST sender admission and rechecks the authenticated session after lock waits. Server events retain legacy `message.created`, `match.created`, `access.revoked` compatibility; the additive Node-only `chat.event` stream carries durable versioned metadata with `eventId`, `schemaVersion`, `aggregateId`, `timestamp`, type and `{messageId,sequence}` payload. See [CHAT_EVENTS.md](CHAT_EVENTS.md) for the exact contract, authorized replay, migration and runtime differences.
+
+The current client uses legacy `message.created` as a refresh signal and pages complete authorized message history with bounded sequence catch-up. It does not consume the new typed metadata stream. Both streams reauthorize recipients before publication. Live socket publication is best-effort; persisted Node events and messages remain replayable after restart. Read receipts, typing, transport delivery guarantees and cross-instance Socket.IO pub/sub are not implemented by this release.
 
 ## Purchase-interest extension
 

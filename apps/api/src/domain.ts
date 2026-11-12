@@ -1,3 +1,4 @@
+import { persistMessageEvent } from "./chat-events.js";
 import { catalogueSnapshot } from "./response-contracts.js";
 import { randomUUID } from "node:crypto";
 import { db, one, tx, type Conn } from "./db.js";
@@ -171,6 +172,7 @@ export async function sendMessage(
   id: string,
   text: string,
   client: string,
+  session?: { tokenHash: string },
 ) {
   return tx(async (c) => {
     // Count and retry IDs are sender-wide, so serialize before any match lock.
@@ -179,6 +181,15 @@ export async function sendMessage(
       `message-sender:${user}`,
     ]);
     const m = await activeMatch(c, id, user, true);
+    if (
+      session &&
+      !(await one(
+        c,
+        "SELECT 1 FROM sessions WHERE token_hash=$1 AND user_id=$2 AND expires_at>clock_timestamp()",
+        [session.tokenHash, user],
+      ))
+    )
+      return fail(401, "SESSION_EXPIRED", "Please log in to continue.");
     const existing = await one(
       c,
       "SELECT * FROM messages WHERE sender_id=$1 AND client_id=$2",
@@ -191,6 +202,7 @@ export async function sendMessage(
           "IDEMPOTENCY_CONFLICT",
           "Message key was already used.",
         );
+      await persistMessageEvent(c, existing);
       return existing;
     }
     const recent = await one(
@@ -209,11 +221,13 @@ export async function sendMessage(
       id,
       sequence,
     ]);
-    return one(
+    const message = await one(
       c,
       "INSERT INTO messages(id,match_id,sequence,sender_id,client_id,text,created_at) VALUES($1,$2,$3,$4,$5,$6,clock_timestamp()) RETURNING *",
       [randomUUID(), id, sequence, user, client, text],
     );
+    await persistMessageEvent(c, message);
+    return message;
   });
 }
 export async function planDTO(c: Conn | typeof db, p: any, user: string) {

@@ -1,3 +1,4 @@
+import { eventForMessage, messageEventEnvelope } from "./chat-events.js";
 import {
   catalogueSnapshot,
   paymentSummariesResponse,
@@ -88,12 +89,14 @@ export async function buildApp() {
     },
   });
   async function broadcastMessage(message: any) {
+    const event = await eventForMessage(message.id);
     for (const recipient of await io
       .in(`match:${message.match_id}`)
       .fetchSockets()) {
       try {
         const current = await authenticate(recipient.data.sessionToken);
         await activeMatch(db, message.match_id, current.user_id);
+        recipient.emit("chat.event", event);
         recipient.emit("message.created", message);
       } catch {
         recipient.leave(`match:${message.match_id}`);
@@ -749,6 +752,26 @@ export async function buildApp() {
     }
     return ok(output);
   });
+  app.get("/api/v1/conversations/:id/events", async (r) => {
+    const s = await member(r),
+      mid = param(r);
+    await activeMatch(db, mid, s.user_id);
+    const after = z
+      .string()
+      .max(16)
+      .regex(/^\d+$/)
+      .default("0")
+      .transform(Number)
+      .pipe(z.number().int().min(0).max(Number.MAX_SAFE_INTEGER))
+      .parse((r.query as any).after);
+    const rows = (
+      await db.query(
+        "SELECT * FROM chat_message_events WHERE conversation_id=$1 AND sequence>$2::bigint ORDER BY sequence,event_id LIMIT 100",
+        [mid, after],
+      )
+    ).rows;
+    return ok(rows.map(messageEventEnvelope));
+  });
   app.get("/api/v1/conversations/:id/messages", async (r) => {
     const s = await member(r);
     const mid = param(r);
@@ -778,6 +801,7 @@ export async function buildApp() {
       param(r),
       b.text,
       b.clientMessageId,
+      { tokenHash: s.token_hash },
     );
     await broadcastMessage(message);
     return ok(message);
@@ -1351,12 +1375,24 @@ export async function buildApp() {
   };
   io.on("connection", (socket) => {
     socket.on("conversation.subscribe", async (mid, ack) => {
+      let room: string | undefined;
       try {
+        const conversationId = id.parse(mid);
+        room = `match:${conversationId}`;
         const s = await authenticate(socket.data.sessionToken);
-        await activeMatch(db, id.parse(mid), s.user_id);
-        await socket.join(`match:${mid}`);
+        await activeMatch(db, conversationId, s.user_id);
+        await socket.join(room);
+        const fresh = await authenticate(socket.data.sessionToken);
+        await activeMatch(db, conversationId, fresh.user_id);
         acknowledgeSocket(ack, { ok: true });
       } catch {
+        if (room) {
+          try {
+            await socket.leave(room);
+          } catch {
+            /* Delivery still reauthorizes every recipient. */
+          }
+        }
         acknowledgeSocket(ack, { error: "Conversation unavailable" });
       }
     });
@@ -1375,6 +1411,7 @@ export async function buildApp() {
           b.conversationId,
           b.text,
           b.clientMessageId,
+          { tokenHash: s.token_hash },
         );
         await broadcastMessage(m);
         acknowledgeSocket(ack, { data: m });
