@@ -2,7 +2,20 @@
 
 > A good connection deserves a good first date.
 
-BaePal is a mobile-first dating web app for adults. Two people match, chat, privately agree on a date they can both afford, and each pays for their own ticket for a fictional date experience through **PayPal Checkout (Sandbox)**. AI helps along the way, and every AI result is a suggestion that a person has to act on.
+**Dating where PayPal is the trust layer: verified people, protected first dates, and an AI agent that plans and pays.**
+
+BaePal is a mobile-first dating web app for adults, and PayPal does something real at every step:
+
+| Step | What happens | PayPal |
+| --- | --- | --- |
+| Profile | **Verified by PayPal** badge | Log in with PayPal (OAuth + `verified_account`) |
+| Plan | The AI agent picks a date within both *private* budgets and proposes it | Orders v2 checkout per person |
+| Commit | Each person places a **$10 no-show hold** | Orders v2 `AUTHORIZE` |
+| Date night | Both check in, so both holds are voided | Authorization **void** |
+| Ghosted | The no-show's hold is captured and paid to the person who came | Authorization **capture** + **Payouts** |
+| Cancel | Tickets refunded | Captures **refund** |
+
+Every AI result is a proposal that a person approves; the agent never spends money without each member's own PayPal approval.
 
 ## The problem
 
@@ -18,6 +31,8 @@ First dates get awkward around money. Nobody wants to say "that's above my budge
 | Chat | Persisted chat over REST + Socket.IO with ordered catch-up, idempotent retries, block/report/unmatch with immediate revocation |
 | **AI preference interpreter** | A member describes dates they enjoy in their own words. The model proposes tags from a fixed list and quotes the matching phrase. Tags stay drafts until the member confirms them and saves. |
 | **AI icebreakers** | Three editable opening lines drafted from the match's **public** prompts only. Picking one fills the composer; nothing is sent automatically. |
+| **Verified by PayPal** | Log in with PayPal links one PayPal account per member. The badge appears only when PayPal reports `verified_account`. BaePal keeps only the payer ID, the verified flag and the email, which is encrypted and used solely as the member's own payout destination. |
+| **AI date agent** | **Let the AI agent book it** takes the eligible options (already within both private budgets and times). The model ranks them, and the agent proposes the top pick at a valid time and accepts it for the requester. The partner still accepts, and each person approves their own PayPal payment. |
 | **AI date planner** | The server first filters the catalogue by **both** private budgets, activities and overlapping time windows. The model only ranks those eligible options and explains its choices. Invented IDs are rejected, and the private budgets never reach the model. |
 | Date consent | Versioned proposals. Both members accept the same version; any edit clears earlier acceptances. |
 | **PayPal checkout** | Official PayPal JS SDK Smart Buttons, plus a hosted-redirect fallback. The server creates an Orders v2 `CAPTURE` order from the accepted plan snapshot, so the client cannot set the amount, payee or buyer. A separate capture step runs after approval, and the server verifies the amount, currency, payee, `reference_id` and `custom_id` before marking a ticket paid. |
@@ -88,6 +103,8 @@ AI_API_KEY=<your key>
 2. **Testing Tools → Sandbox Accounts**: open the default *Business* account → **View/Edit account** and copy its **Account ID** (the merchant ID). Note a *Personal* account email/password; it is the test buyer.
 3. In `.env`: `PAYPAL_MODE=sandbox`, `PAYPAL_CLIENT_ID=…`, `PAYPAL_CLIENT_SECRET=…`, `PAYPAL_MERCHANT_ID=…`. Restart `pnpm dev`.
 4. Optional webhooks need a public HTTPS URL (Render): add `https://<api-host>/api/v1/webhooks/paypal` in the app's webhook settings and set `PAYPAL_WEBHOOK_ID`.
+5. **Log in with PayPal**, for the Verified by PayPal badge. In your Sandbox app's **Features**, enable **Log in with PayPal**. Then set the **Return URL** to `<APP_ORIGIN>/api/v1/auth/paypal/callback`, for example `https://baepal-web.onrender.com/api/v1/auth/paypal/callback`. Under the information requested, tick **Email** and **PayPal account verification status**. Use the HTTPS Render URL if PayPal rejects `localhost`.
+6. **Payouts** (for the no-show payout) are normally enabled on Sandbox business accounts. If a claim fails with a permission error, enable Payouts for the app in the dashboard.
 
 ### Verify your keys (no money moves)
 
@@ -116,14 +133,20 @@ It prints no secrets. On startup, the API also logs whether PayPal accepted the 
 
 ## Two-minute judge walkthrough
 
-1. **Alex** → Profile → Edit → describe ideal dates → **Suggest tags** (AI) → confirm → Save.
+The flow: match, the AI agent books the date, one person ghosts, and the other gets paid on screen.
+
+1. **Alex** → Profile → **Log in with PayPal** → the **Verified by PayPal** badge appears on Alex's card. Then Edit → describe ideal dates → **Suggest tags** (AI) → confirm → Save.
 2. Discover → like Jordan; **Jordan** likes Alex → match. (Or run `node scripts/demo-pair.mjs`.)
 3. Chat → **Draft openers with AI** → pick one, edit, send. Jordan sees it.
-4. **Plan a date** → each person saves a *private* budget and time window → **Find shared possibilities**: AI-ranked options that fit both budgets, each with a reason.
-5. Propose → both accept the same version.
-6. Each opens **checkout** → **PayPal** button → approve with the Sandbox buyer → the server captures and verifies. After the first ticket, the plan shows `partially_paid`; after the second, it shows `confirmed`.
-7. **No-show protection** (the main demo moment): both people place the $10 PayPal hold. Alex taps **I'm here**; Jordan doesn't. Alex taps **They didn't show** and enters a Sandbox personal email. Jordan's hold is captured and paid out to Alex on screen, and Alex's own hold is released. To show the happy path instead, have both people check in, and both holds are voided. In demo mode the time window is relaxed so this fits in a walkthrough.
-8. **Cancel the plan** → refunds go to PayPal; receipts show the refund IDs.
+4. **Plan a date** → each person saves a *private* budget and time window → **✦ Let the AI agent book it**. The agent shows its steps:
+   1. It filters to options within both private budgets and both time windows.
+   2. The model ranks them by shared interests.
+   3. It proposes the top pick at a valid time and accepts it for Alex.
+   
+   Jordan accepts. (Or run `node scripts/demo-date.mjs` to jump straight to "both accepted".)
+5. Each opens **checkout** → **PayPal** button → approve with the Sandbox buyer → the server captures and verifies. After the first ticket, the plan shows `partially_paid`; after the second, it shows `confirmed`.
+6. **No-show protection** (the main demo moment): both people place the $10 PayPal hold. Alex taps **I'm here**; Jordan doesn't. Alex taps **They didn't show** and enters a Sandbox personal email. Jordan's hold is captured and paid out to Alex on screen, and Alex's own hold is released. To show the happy path instead, have both people check in, and both holds are voided. In demo mode the time window is relaxed so this fits in a walkthrough.
+7. **Cancel the plan** → refunds go to PayPal; receipts show the refund IDs.
 8. Optional: log in as the moderator and go to **Reports**. You can dismiss, warn, suspend, restore or escalate a report; each action needs a reason and is written to the audit log. Suspending logs the member out immediately, and the reporter only ever sees "received" or "closed".
 
 ## Honest limits
