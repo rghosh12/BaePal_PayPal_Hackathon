@@ -47,6 +47,7 @@ import {
   activeMatch,
   planFor,
   publicProfile,
+  sameSnapshot,
   eligible,
   decide,
   sendMessage,
@@ -951,11 +952,33 @@ export async function buildApp() {
         [s.user_id],
       )
     ).rows;
+    const mine = await publicProfile(db, s.user_id);
+    const comments = new Map(
+      (
+        await db.query(
+          "SELECT actor_id,kind,position,snapshot,text,created_at FROM like_comments WHERE target_id=$1",
+          [s.user_id],
+        )
+      ).rows.map((x) => [x.actor_id, x]),
+    );
     const cards = [];
     for (const x of likers)
-      if (await eligible(db, s.user_id, x.actor_id))
-        cards.push(await publicProfile(db, x.actor_id));
-    return ok(withShared(cards, await publicProfile(db, s.user_id)));
+      if (await eligible(db, s.user_id, x.actor_id)) {
+        const card: any = await publicProfile(db, x.actor_id);
+        const c = comments.get(x.actor_id);
+        if (c) {
+          const available = sameSnapshot(mine, c.kind, c.position, c.snapshot);
+          card.comment = {
+            text: c.text,
+            kind: c.kind,
+            snapshot: available ? c.snapshot : null,
+            available,
+            createdAt: c.created_at,
+          };
+        }
+        cards.push(card);
+      }
+    return ok(withShared(cards, mine));
   });
   // Ordered by shared declared interests, then user id. The cursor is an
   // HMAC-signed keyset position bound to the member's current filters, so a
@@ -966,6 +989,7 @@ export async function buildApp() {
       .object({
         cursor: z.string().max(400).optional(),
         limit: z.coerce.number().int().min(1).max(30).default(30),
+        interest: z.string().trim().min(1).max(40).optional(),
       })
       .parse(r.query);
     const me = await one(
@@ -981,6 +1005,7 @@ export async function buildApp() {
         [...me.genders].sort(),
         me.age_min,
         me.age_max,
+        q.interest ?? null,
       ]),
     ).slice(0, 16);
     let after: { n: number; id: string } | null = null;
@@ -1014,6 +1039,7 @@ export async function buildApp() {
            AND NOT EXISTS (SELECT 1 FROM matches m WHERE m.low_id=LEAST($1::uuid,u.id) AND m.high_id=GREATEST($1::uuid,u.id))
            AND ($9::int IS NULL OR cardinality(ARRAY(SELECT unnest(p.interests) INTERSECT SELECT unnest($2::text[]))) < $9
                 OR (cardinality(ARRAY(SELECT unnest(p.interests) INTERSECT SELECT unnest($2::text[]))) = $9 AND u.id > $10::uuid))
+           AND ($12::text IS NULL OR $12 = ANY(p.interests))
          ORDER BY shared DESC, u.id
          LIMIT $11`,
         [
@@ -1028,6 +1054,7 @@ export async function buildApp() {
           after?.n ?? null,
           after?.id ?? null,
           q.limit + 1,
+          q.interest ?? null,
         ],
       )
     ).rows;
@@ -1904,6 +1931,12 @@ export async function buildApp() {
         appeals: await rows(
           "SELECT id,state,text,created_at FROM appeals WHERE user_id=$1",
         ),
+        sentComments: await rows(
+          "SELECT kind,position,snapshot,text,created_at FROM like_comments WHERE actor_id=$1",
+        ),
+        hiddenContacts: (
+          await rows("SELECT count(*)::int AS n FROM contact_hides WHERE user_id=$1")
+        )[0]?.n,
         entitlements: await rows(
           "SELECT id,product,amount_cents,state,created_at FROM entitlements WHERE user_id=$1",
         ),
@@ -1954,8 +1987,13 @@ export async function buildApp() {
         "member_settings",
         "read_watermarks",
         "connections",
+        "contact_hides",
       ])
         await c.query(`DELETE FROM ${table} WHERE user_id=$1`, [s.user_id]);
+      await c.query(
+        "DELETE FROM like_comments WHERE actor_id=$1 OR target_id=$1",
+        [s.user_id],
+      );
       await c.query("UPDATE messages SET text='[deleted]' WHERE sender_id=$1", [
         s.user_id,
       ]);

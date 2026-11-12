@@ -111,6 +111,7 @@ export default function BaePal() {
     [updates, setUpdates] = useState<Row | null>(null),
     [slotChoice, setSlotChoice] = useState<Record<string, string>>({});
   const csrf = useRef("");
+  const interestFilter = useRef("");
   const configCache = useRef<Row | null>(null);
   const socket = useRef<Socket | null>(null);
   const refreshSequence = useRef(0),
@@ -225,7 +226,11 @@ export default function BaePal() {
           fresh = inbox;
           hasData = true;
         } else if (path === "/discover") {
-          fresh = await api("/discover");
+          fresh = await api(
+            interestFilter.current
+              ? `/discover?interest=${encodeURIComponent(interestFilter.current)}`
+              : "/discover",
+          );
           hasData = true;
         } else if (path === "/likes" && !conf.hosted) {
           fresh = await api("/likes");
@@ -1570,6 +1575,25 @@ export default function BaePal() {
             <MapPin size={13} />
             Seattle pilot
           </span>
+          {!config.hosted && (
+            <label>
+              Interest
+              <select
+                value={interestFilter.current}
+                onChange={(e) => {
+                  interestFilter.current = e.target.value;
+                  void refresh();
+                }}
+              >
+                <option value="">Any</option>
+                {["Coffee", "Art", "Hiking", "Books", "Music", "Food"].map((i) => (
+                  <option key={i} value={i}>
+                    {i}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
         {cards.length ? (
           <div className="discovery-layout">
@@ -1621,6 +1645,50 @@ export default function BaePal() {
                   <span>I’m interested</span>
                 </button>
               </div>
+              {!config.hosted && (
+                <form
+                  className="form-stack"
+                  onSubmit={submit(async (f) => {
+                    const [kind, position] = String(f.get("target")).split(":");
+                    const result = await api("/likes/comments", "POST", {
+                      targetId: cards[0].user_id,
+                      kind,
+                      position: Number(position),
+                      text: f.get("text"),
+                      clientMutationId: crypto.randomUUID(),
+                    });
+                    setNotice(
+                      result.match
+                        ? "It’s mutual! Your conversation is ready in Chats."
+                        : "Like and comment sent.",
+                    );
+                    await refresh();
+                  })}
+                >
+                  <label>
+                    Like with a comment on
+                    <select name="target">
+                      {(cards[0].prompts || []).map((q: Row, i: number) => (
+                        <option key={`prompt:${i}`} value={`prompt:${i}`}>
+                          {q.question}
+                        </option>
+                      ))}
+                      {(cards[0].photos || []).map((_: string, i: number) => (
+                        <option key={`photo:${i}`} value={`photo:${i}`}>
+                          Photo {i + 1}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Your comment
+                    <input name="text" required maxLength={300} />
+                  </label>
+                  <button className="button secondary" disabled={busy}>
+                    Send like with comment
+                  </button>
+                </form>
+              )}
             </div>
             <aside className="discovery-aside">
               <div className="note-card lavender">
@@ -1743,6 +1811,18 @@ export default function BaePal() {
             {likes.map((p: Row) => (
               <div key={p.user_id} className="form-stack">
                 <ProfileCard p={p} compact />
+                {p.comment && (
+                  <div className="note-card">
+                    <p className="muted">
+                      {p.comment.available
+                        ? p.comment.kind === "prompt"
+                          ? `On “${p.comment.snapshot.question}”`
+                          : "On one of your photos"
+                        : "On something you've since changed"}
+                    </p>
+                    <p>{p.comment.text}</p>
+                  </div>
+                )}
                 <div className="decision-bar">
                   <button
                     className="pass"
@@ -2602,6 +2682,32 @@ export default function BaePal() {
               "secondary",
             )}
           </div>
+          {!config.hosted && (
+            <form
+              className="panel form-stack"
+              onSubmit={submit(async (f) => {
+                const emails = String(f.get("emails") || "")
+                  .split(/[\s,]+/)
+                  .filter(Boolean);
+                if (!emails.length) return;
+                await api("/me/hidden-contacts", "POST", { emails });
+                setNotice(
+                  "Hidden. If they're on BaePal, neither of you will see the other.",
+                );
+              })}
+            >
+              <h2>Hide people you know</h2>
+              <p className="muted">
+                Type email addresses (one per line). We store only a scrambled
+                fingerprint, never the address or your contacts list.
+              </p>
+              <label>
+                Email addresses
+                <textarea name="emails" rows={3} />
+              </label>
+              <button className="button secondary">Hide these contacts</button>
+            </form>
+          )}
           <form
             className="panel form-stack"
             onSubmit={submit(async (f) => {

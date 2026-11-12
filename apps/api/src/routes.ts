@@ -4,13 +4,17 @@ import { randomUUID } from "node:crypto";
 import argon2 from "argon2";
 import { z } from "zod";
 import { config } from "./config.js";
-import { equal, hash, token } from "./crypto.js";
+import { contactHash, equal, hash, token } from "./crypto.js";
 import { db, one, tx } from "./db.js";
 import {
   activeMatch,
+  decide,
+  eligible,
   fail,
   planFor,
+  publicProfile,
   resolveLocalTime,
+  snapshotOf,
   VENUE_TZ,
 } from "./domain.js";
 import { matchMembers, notify } from "./notifications.js";
@@ -225,6 +229,89 @@ export function registerExtraRoutes(app: FastifyInstance, ctx: RouteContext) {
       );
       return ok({ undone: true, targetId: last.target_id });
     });
+  });
+
+  // ---- Like with a comment on a prompt or photo (#17) -------------------
+  app.post("/api/v1/likes/comments", async (r) => {
+    const s = await member(r);
+    const b = z
+      .object({
+        targetId: uuid,
+        kind: z.enum(["prompt", "photo"]),
+        position: z.number().int().min(0).max(11),
+        text: z.string().trim().min(1).max(300),
+        clientMutationId: uuid,
+      })
+      .strict()
+      .parse(r.body);
+    if (!(await eligible(db, s.user_id, b.targetId)))
+      return fail(404, "PROFILE_UNAVAILABLE", "This profile is no longer available.");
+    const snapshot = snapshotOf(
+      await publicProfile(db, b.targetId),
+      b.kind,
+      b.position,
+    );
+    if (!snapshot)
+      return fail(422, "TARGET_UNAVAILABLE", "That part of the profile has changed.");
+    const result = await decide(s.user_id, b.targetId, "like", b.clientMutationId);
+    await db.query(
+      "INSERT INTO like_comments(actor_id,target_id,kind,position,snapshot,text) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (actor_id,target_id) DO NOTHING",
+      [s.user_id, b.targetId, b.kind, b.position, JSON.stringify(snapshot), b.text],
+    );
+    if (result.match)
+      io.to(`user:${s.user_id}`)
+        .to(`user:${b.targetId}`)
+        .emit("match.created", { id: result.match.id });
+    return ok(result);
+  });
+
+  // ---- Consensual contact hiding (#19) ---------------------------------
+  // Members type specific email addresses; only keyed hashes are stored and
+  // nothing is uploaded from an address book.
+  app.get("/api/v1/me/hidden-contacts", async (r) => {
+    const s = await member(r);
+    const rows = (
+      await db.query(
+        "SELECT contact_hash,created_at FROM contact_hides WHERE user_id=$1 ORDER BY created_at",
+        [s.user_id],
+      )
+    ).rows;
+    return ok({
+      count: rows.length,
+      entries: rows.map((x) => ({ id: x.contact_hash.slice(0, 16), createdAt: x.created_at })),
+    });
+  });
+  app.post("/api/v1/me/hidden-contacts", async (r) => {
+    const s = await member(r);
+    const b = z
+      .object({ emails: z.array(z.string().trim().email().max(254)).min(1).max(50) })
+      .strict()
+      .parse(r.body);
+    const existing = await one(
+      db,
+      "SELECT count(*)::int AS n FROM contact_hides WHERE user_id=$1",
+      [s.user_id],
+    );
+    if (existing.n + b.emails.length > 500)
+      return fail(422, "HIDE_LIMIT", "You can hide up to 500 contacts.");
+    for (const email of b.emails)
+      await db.query(
+        "INSERT INTO contact_hides(user_id,contact_hash) VALUES($1,$2) ON CONFLICT DO NOTHING",
+        [s.user_id, contactHash(email)],
+      );
+    return ok({ hidden: b.emails.length });
+  });
+  app.delete("/api/v1/me/hidden-contacts/:entry", async (r) => {
+    const s = await member(r);
+    const entry = z
+      .string()
+      .regex(/^[0-9a-f]{16}$/)
+      .parse((r.params as any).entry);
+    const res = await db.query(
+      "DELETE FROM contact_hides WHERE user_id=$1 AND left(contact_hash,16)=$2",
+      [s.user_id, entry],
+    );
+    return ok({ removed: res.rowCount ?? 0 });
   });
 
   // ---- Decline a proposal (#5) -----------------------------------------

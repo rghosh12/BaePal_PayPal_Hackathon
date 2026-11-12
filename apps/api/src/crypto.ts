@@ -11,6 +11,8 @@ export const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 export const keyed = (value: string) =>
   createHmac("sha256", config.SESSION_SECRET).update(value).digest("hex");
+export const contactHash = (email: string) =>
+  keyed(`contact:${email.trim().toLowerCase()}`);
 export const token = () => randomBytes(32).toString("hex");
 export function equal(a: string, b: string) {
   const x = Buffer.from(a);

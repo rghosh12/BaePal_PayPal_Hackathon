@@ -432,3 +432,94 @@ describe("contracts and privacy (#11, #16)", () => {
     expect((await db.query("SELECT 1 FROM member_settings WHERE user_id=$1", [u.id])).rowCount).toBe(0);
   });
 });
+
+describe("targeted comments and optional filters (#17)", () => {
+  it("shows a prompt comment in the likes inbox until that prompt changes", async () => {
+    const [a, b] = [await makeUser(), await makeUser()];
+    await db.query(
+      `UPDATE profiles SET prompts='[{"question":"Best Sunday","answer":"Ferry and dumplings"}]' WHERE user_id=$1`,
+      [b.id],
+    );
+    expect(
+      (
+        await request(a, "POST", "/likes/comments", {
+          targetId: b.id,
+          kind: "prompt",
+          position: 3,
+          text: "Same!",
+          clientMutationId: randomUUID(),
+        })
+      ).statusCode,
+    ).toBe(422);
+    await data(a, "POST", "/likes/comments", {
+      targetId: b.id,
+      kind: "prompt",
+      position: 0,
+      text: "Which ferry?",
+      clientMutationId: randomUUID(),
+    });
+    let [card] = await data(b, "GET", "/likes");
+    expect(card.user_id).toBe(a.id);
+    expect(card.comment).toMatchObject({
+      text: "Which ferry?",
+      kind: "prompt",
+      available: true,
+      snapshot: { question: "Best Sunday", answer: "Ferry and dumplings" },
+    });
+    await db.query(
+      `UPDATE profiles SET prompts='[{"question":"Best Sunday","answer":"Bookshops"}]' WHERE user_id=$1`,
+      [b.id],
+    );
+    [card] = await data(b, "GET", "/likes");
+    expect(card.comment).toMatchObject({ available: false, snapshot: null });
+    // Liking back forms the match; the comment stays out of other members' views.
+    const result = await data(b, "POST", "/decisions", {
+      targetId: a.id,
+      action: "like",
+      clientMutationId: randomUUID(),
+    });
+    expect(result.match).toBeTruthy();
+  });
+
+  it("filters discovery by one declared interest and binds it to the cursor", async () => {
+    const me = await makeUser({ interests: ["Art"] });
+    await makeUser({ interests: ["Art"] });
+    await makeUser({ interests: ["Hiking"] });
+    const all = await request(me, "GET", "/discover?limit=1");
+    expect(all.json().data).toHaveLength(1);
+    const hikers = await data(me, "GET", "/discover?interest=Hiking");
+    expect(hikers).toHaveLength(1);
+    expect(hikers[0].interests).toContain("Hiking");
+    const stale = await request(
+      me,
+      "GET",
+      `/discover?interest=Hiking&cursor=${encodeURIComponent(all.json().nextCursor)}`,
+    );
+    expect(stale.statusCode).toBe(409);
+  });
+});
+
+describe("contact hiding (#19)", () => {
+  it("hides both people from each other without storing the email", async () => {
+    const [a, b] = [await makeUser(), await makeUser()];
+    expect(await data(a, "GET", "/discover")).toHaveLength(1);
+    await data(a, "POST", "/me/hidden-contacts", { emails: [b.email.toUpperCase()] });
+    expect(await data(a, "GET", "/discover")).toHaveLength(0);
+    expect(await data(b, "GET", "/discover")).toHaveLength(0);
+    const stored = await db.query("SELECT * FROM contact_hides WHERE user_id=$1", [a.id]);
+    expect(JSON.stringify(stored.rows)).not.toContain(b.email.split("@")[0]);
+    expect(
+      (
+        await request(b, "POST", "/decisions", {
+          targetId: a.id,
+          action: "like",
+          clientMutationId: randomUUID(),
+        })
+      ).statusCode,
+    ).toBe(404);
+    const list = await data(a, "GET", "/me/hidden-contacts");
+    expect(list.count).toBe(1);
+    await data(a, "DELETE", `/me/hidden-contacts/${list.entries[0].id}`);
+    expect(await data(a, "GET", "/discover")).toHaveLength(1);
+  });
+});

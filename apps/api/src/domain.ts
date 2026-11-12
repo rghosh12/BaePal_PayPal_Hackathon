@@ -3,7 +3,7 @@ import { notify } from "./notifications.js";
 import { catalogueSnapshot } from "./response-contracts.js";
 import { randomUUID } from "node:crypto";
 import { db, one, tx, type Conn } from "./db.js";
-import { ageOn, decrypt, encrypt } from "./crypto.js";
+import { ageOn, contactHash, decrypt, encrypt } from "./crypto.js";
 export class AppError extends Error {
   constructor(
     public status: number,
@@ -69,6 +69,27 @@ export async function publicProfile(c: Conn | typeof db, id: string) {
     [id],
   );
 }
+// A like comment's prompt/photo snapshot, read from the public profile DTO.
+export const snapshotOf = (profile: any, kind: string, position: number) => {
+  const item =
+    kind === "prompt" ? profile?.prompts?.[position] : profile?.photos?.[position];
+  if (item == null) return null;
+  return kind === "prompt"
+    ? { question: item.question, answer: item.answer }
+    : { url: item };
+};
+export const sameSnapshot = (
+  profile: any,
+  kind: string,
+  position: number,
+  snap: any,
+) => {
+  const now = snapshotOf(profile, kind, position);
+  if (!now || !snap) return false;
+  return kind === "prompt"
+    ? now.question === snap.question && now.answer === snap.answer
+    : now.url === snap.url;
+};
 export async function eligible(
   c: Conn | typeof db,
   a: string,
@@ -77,7 +98,7 @@ export async function eligible(
 ) {
   if (a === b) return false;
   const rows = await c.query(
-    `SELECT u.id,u.status,u.role,p.city,q.gender,q.genders,q.age_min,q.age_max,q.birth_date FROM users u JOIN profiles p ON p.user_id=u.id JOIN profile_private q ON q.user_id=u.id WHERE u.id=ANY($1::uuid[])`,
+    `SELECT u.id,u.email,u.status,u.role,p.city,q.gender,q.genders,q.age_min,q.age_max,q.birth_date FROM users u JOIN profiles p ON p.user_id=u.id JOIN profile_private q ON q.user_id=u.id WHERE u.id=ANY($1::uuid[])`,
     [[a, b]],
   );
   if (
@@ -100,10 +121,12 @@ export async function eligible(
     )
       return false;
   }
+  const hashOf = (id: string) =>
+    contactHash(rows.rows.find((r) => r.id === id).email);
   return !(
     await c.query(
-      "SELECT 1 FROM blocks WHERE (actor_id=$1 AND target_id=$2) OR (actor_id=$2 AND target_id=$1) UNION ALL SELECT 1 FROM matches WHERE low_id=LEAST($1::uuid,$2::uuid) AND high_id=GREATEST($1::uuid,$2::uuid) AND (status<>'active' OR NOT $3::boolean)",
-      [a, b, allowActiveMatch],
+      "SELECT 1 FROM blocks WHERE (actor_id=$1 AND target_id=$2) OR (actor_id=$2 AND target_id=$1) UNION ALL SELECT 1 FROM matches WHERE low_id=LEAST($1::uuid,$2::uuid) AND high_id=GREATEST($1::uuid,$2::uuid) AND (status<>'active' OR NOT $3::boolean) UNION ALL SELECT 1 FROM contact_hides WHERE (user_id=$1 AND contact_hash=$5) OR (user_id=$2 AND contact_hash=$4)",
+      [a, b, allowActiveMatch, hashOf(a), hashOf(b)],
     )
   ).rowCount;
 }
